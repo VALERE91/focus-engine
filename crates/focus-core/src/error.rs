@@ -20,6 +20,8 @@ pub enum Error {
     NothingToOpen(String),
     #[error("could not open {url}: {reason}")]
     Open { url: String, reason: String },
+    #[error("HTTP client could not start: {0}")]
+    HttpClient(String),
     #[error("project name is empty")]
     EmptyName,
 }
