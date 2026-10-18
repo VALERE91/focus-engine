@@ -163,7 +163,7 @@ interface types {
     title: string,
     category: category,
     tags: list<string>,
-    est-minutes: u32,
+    est-minutes: u32,          // 0 = unknown, the host applies its default
     difficulty: option<f32>,
     device: device,
     content: list<block>,
@@ -179,11 +179,16 @@ interface types {
     allowed-hosts: list<string>,
     wants-llm: bool,
   }
+
+  // Redirects are never followed, so a source can tell a 200 from a 3xx
+  // (the YouTube Shorts check depends on it).
+  record http-response { status: u16, location: option<string>, body: list<u8> }
 }
 
 interface host {
+  use types.{http-response};
   // no personal data crosses this boundary
-  http-get: func(url: string) -> result<list<u8>, string>;     // allowlisted hosts only
+  http-get: func(url: string) -> result<http-response, string>;  // allowlisted hosts only
   kv-get: func(key: string) -> option<list<u8>>;
   kv-set: func(key: string, value: list<u8>);
   llm: func(prompt: string, max-tokens: u32) -> result<string, string>;  // user's key, host-side quota
@@ -199,6 +204,8 @@ world extension {
   export refresh: func();      // called on a schedule to prefetch
 }
 ```
+
+A reference copy of this package lives in `extensions/wit/focus-engine.wit`.
 
 **Capabilities and limits**
 
