@@ -1,0 +1,17 @@
+[package]
+name = "focus-app"
+description = "Focus Engine desktop app (Dioxus), solo mode."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+focus-core.workspace = true
+dioxus.workspace = true
+tokio.workspace = true
+
+[features]
+default = ["desktop"]
+desktop = ["dioxus/desktop"]

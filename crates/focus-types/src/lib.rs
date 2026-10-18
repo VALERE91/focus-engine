@@ -202,6 +202,13 @@ impl BudgetStatus {
     pub fn is_spent(&self) -> bool {
         self.spent_minutes >= self.limit_minutes
     }
+
+    /// 0 to 100, for a progress bar. A zero limit counts as fully spent.
+    pub fn percent_spent(&self) -> u32 {
+        (u64::from(self.spent_minutes) * 100)
+            .checked_div(u64::from(self.limit_minutes))
+            .map_or(100, |p| p.min(100) as u32)
+    }
 }
 
 /// What the desktop feed shows: the budget and the remaining new uploads.
@@ -306,5 +313,18 @@ mod tests {
         };
         assert_eq!(b.remaining_minutes(), 0);
         assert!(b.is_spent());
+        assert_eq!(b.percent_spent(), 100);
+        let half = BudgetStatus {
+            spent_minutes: 30,
+            ..b.clone()
+        };
+        assert_eq!(half.percent_spent(), 50);
+        let none = BudgetStatus {
+            limit_minutes: 0,
+            spent_minutes: 0,
+            ..b
+        };
+        assert!(none.is_spent());
+        assert_eq!(none.percent_spent(), 100);
     }
 }
