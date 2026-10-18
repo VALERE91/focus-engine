@@ -5,6 +5,7 @@ pub mod adapters;
 pub mod budget;
 pub mod error;
 pub mod http;
+pub mod projects;
 pub mod source;
 pub mod storage;
 pub mod youtube;
