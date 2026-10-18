@@ -1,4 +1,4 @@
-# focus-engine
+# Focus Engine
 A simple AI tool that help you focus and grow your mind.
 
 - **Is it written with AI?** : Yes, a lot, but every design and feature decisions are human. 
