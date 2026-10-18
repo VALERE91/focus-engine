@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns:yt="http://www.youtube.com/xml/schemas/2015" xmlns:media="http://search.yahoo.com/mrss/" xmlns="http://www.w3.org/2005/Atom">
+ <link rel="self" href="http://www.youtube.com/feeds/videos.xml?playlist_id=UULFsXVk37bltHxD1rDPwtNM8Q"/>
+ <id>yt:playlist:UULFsXVk37bltHxD1rDPwtNM8Q</id>
+ <yt:playlistId>UULFsXVk37bltHxD1rDPwtNM8Q</yt:playlistId>
+ <yt:channelId>UCsXVk37bltHxD1rDPwtNM8Q</yt:channelId>
+ <title>Videos</title>
+ <link rel="alternate" href="https://www.youtube.com/playlist?list=UULFsXVk37bltHxD1rDPwtNM8Q"/>
+ <author>
+  <name>Kurzgesagt – In a Nutshell</name>
+  <uri>https://www.youtube.com/channel/UCsXVk37bltHxD1rDPwtNM8Q</uri>
+ </author>
+ <published>2013-07-09T10:35:42+00:00</published>
+ <entry>
+  <id>yt:video:aaaaaaaaaa1</id>
+  <yt:videoId>aaaaaaaaaa1</yt:videoId>
+  <yt:channelId>UCsXVk37bltHxD1rDPwtNM8Q</yt:channelId>
+  <title>The Most Extreme Explosion in the Universe &amp; Why</title>
+  <link rel="alternate" href="https://www.youtube.com/watch?v=aaaaaaaaaa1"/>
+  <author>
+   <name>Kurzgesagt – In a Nutshell</name>
+   <uri>https://www.youtube.com/channel/UCsXVk37bltHxD1rDPwtNM8Q</uri>
+  </author>
+  <published>2026-10-15T14:00:00+00:00</published>
+  <updated>2026-10-16T08:12:44+00:00</updated>
+  <media:group>
+   <media:title>The Most Extreme Explosion in the Universe &amp; Why</media:title>
+   <media:content url="https://www.youtube.com/v/aaaaaaaaaa1?version=3" type="application/x-shockwave-flash" width="640" height="390"/>
+   <media:thumbnail url="https://i2.ytimg.com/vi/aaaaaaaaaa1/hqdefault.jpg" width="480" height="360"/>
+   <media:description>A description with <b>no</b> markup issues.</media:description>
+   <media:community>
+    <media:starRating count="12345" average="5.00" min="1" max="5"/>
+    <media:statistics views="678901"/>
+   </media:community>
+  </media:group>
+ </entry>
+ <entry>
+  <id>yt:video:bbbbbbbbbb2</id>
+  <yt:videoId>bbbbbbbbbb2</yt:videoId>
+  <yt:channelId>UCsXVk37bltHxD1rDPwtNM8Q</yt:channelId>
+  <title>Pourquoi les étoiles brillent ✨</title>
+  <link rel="alternate" href="https://www.youtube.com/watch?v=bbbbbbbbbb2"/>
+  <author>
+   <name>Kurzgesagt – In a Nutshell</name>
+   <uri>https://www.youtube.com/channel/UCsXVk37bltHxD1rDPwtNM8Q</uri>
+  </author>
+  <published>2026-10-10T14:00:00+00:00</published>
+  <updated>2026-10-11T09:00:00+00:00</updated>
+  <media:group>
+   <media:title>Pourquoi les étoiles brillent ✨</media:title>
+   <media:thumbnail url="https://i3.ytimg.com/vi/bbbbbbbbbb2/hqdefault.jpg" width="480" height="360"/>
+   <media:description></media:description>
+  </media:group>
+ </entry>
+ <entry>
+  <id>yt:video:cccccccccc3</id>
+  <yt:videoId>cccccccccc3</yt:videoId>
+  <yt:channelId>UCsXVk37bltHxD1rDPwtNM8Q</yt:channelId>
+  <title>An Old Video</title>
+  <link rel="alternate" href="https://www.youtube.com/watch?v=cccccccccc3"/>
+  <author>
+   <name>Kurzgesagt – In a Nutshell</name>
+  </author>
+  <published>2026-08-01T14:00:00+00:00</published>
+  <updated>2026-08-02T09:00:00+00:00</updated>
+  <media:group>
+   <media:title>An Old Video</media:title>
+   <media:thumbnail url="https://i4.ytimg.com/vi/cccccccccc3/hqdefault.jpg" width="480" height="360"/>
+  </media:group>
+ </entry>
+</feed>

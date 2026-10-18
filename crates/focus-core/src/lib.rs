@@ -7,5 +7,6 @@ pub mod error;
 pub mod http;
 pub mod source;
 pub mod storage;
+pub mod youtube;
 
 pub use error::{Error, Result};
