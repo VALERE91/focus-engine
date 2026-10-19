@@ -193,8 +193,13 @@ interface host {
   use types.{http-response};
   // no personal data crosses this boundary
   http-get: func(url: string) -> result<http-response, string>;  // allowlisted hosts only
+  // A private store per extension. Names follow wasi:keyvalue where they
+  // overlap; listing takes a prefix so an extension can keep one key per item.
   kv-get: func(key: string) -> option<list<u8>>;
   kv-set: func(key: string, value: list<u8>);
+  kv-delete: func(key: string);
+  kv-list: func(prefix: string) -> list<string>;                    // sorted
+  kv-set-many: func(entries: list<tuple<string, list<u8>>>);       // all or nothing
   llm: func(prompt: string, max-tokens: u32) -> result<string, string>;  // user's key, host-side quota
   log: func(msg: string);
 }
@@ -214,7 +219,7 @@ A reference copy of this package lives in `extensions/wit/focus-engine.wit`.
 **Capabilities and limits**
 
 - Network: only `allowed-hosts` from the manifest, enforced by the host.
-- Storage: a per-extension key-value store, no filesystem.
+- Storage: a per-extension key-value store (get, set, delete, list by prefix, atomic multi-set), no filesystem. Extensions keep one key per item rather than whole lists, so no read-modify-write races between concurrent calls.
 - LLM: via the host's OpenAI-compatible client (cloud or local model), using the user's own key and a per-extension daily token cap. Keys are never exposed.
 - Resources: fuel and memory limits per call, a timeout on `candidates`, and refresh runs off the request path.
 - No access to calendar, history, events or other extensions' data. `ctx` is all they see.
