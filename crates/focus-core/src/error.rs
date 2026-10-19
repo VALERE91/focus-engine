@@ -38,6 +38,19 @@ pub enum Error {
          subscriptions.csv inside it."
     )]
     NotATakeoutFile,
+    #[error("Write what “done” means for this project before making it active.")]
+    NoDefinitionOfDone,
+    #[error(
+        "You already have {limit} active project(s): {active}. Pause, finish or kill one \
+         first, or raise the limit in Settings."
+    )]
+    TooManyActiveProjects { limit: u32, active: String },
+    #[error("a work session ends as done or partly done, not {0}")]
+    InvalidVerdict(&'static str),
+    #[error("a week is rated from 1 to 5, not {0}")]
+    InvalidRating(u8),
+    #[error("not a week: {0}")]
+    InvalidWeek(String),
     #[error("project name is empty")]
     EmptyName,
 }

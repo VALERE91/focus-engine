@@ -3,7 +3,7 @@
 
 use dioxus::prelude::*;
 use focus_core::Engine;
-use focus_core::types::ImportReport;
+use focus_core::types::{Category, ImportReport};
 
 use crate::{Tab, Ui};
 
@@ -209,6 +209,10 @@ pub fn ChannelsView() -> Element {
             if channels.is_empty() {
                 p { class: "muted", "Nothing imported yet." }
             } else {
+                p { class: "muted",
+                    "Mark channels that teach you something as Learning: their videos count "
+                    "toward your daily growth share."
+                }
                 div { class: "picker-tools",
                     input {
                         r#type: "search",
@@ -243,6 +247,7 @@ pub fn ChannelsView() -> Element {
                             id: c.id.clone(),
                             title: c.title.clone(),
                             followed: c.followed,
+                            category: c.category,
                         }
                     }
                 }
@@ -260,7 +265,7 @@ pub fn ChannelsView() -> Element {
 }
 
 #[component]
-fn ChannelRow(id: String, title: String, followed: bool) -> Element {
+fn ChannelRow(id: String, title: String, followed: bool, category: Category) -> Element {
     let engine = use_context::<Engine>();
     let ui = use_context::<Ui>();
     let label = if title.is_empty() {
@@ -268,20 +273,37 @@ fn ChannelRow(id: String, title: String, followed: bool) -> Element {
     } else {
         title
     };
+    let follow_engine = engine.clone();
+    let follow_id = id.clone();
+    let learning = category == Category::Learning;
     rsx! {
-        li {
+        li { class: "channel-row",
             label {
                 input {
                     r#type: "checkbox",
                     checked: followed,
                     onchange: move |_| {
-                        if let Err(e) = engine.set_followed(&id, !followed) {
+                        if let Err(e) = follow_engine.set_followed(&follow_id, !followed) {
                             ui.error(e);
                         }
                         ui.changed();
                     },
                 }
                 " {label}"
+            }
+            if followed {
+                button {
+                    class: if learning { "kind learning" } else { "kind" },
+                    title: "Learning videos count toward your growth share",
+                    onclick: move |_| {
+                        let next = if learning { Category::Leisure } else { Category::Learning };
+                        if let Err(e) = engine.set_channel_category(&id, next) {
+                            ui.error(e);
+                        }
+                        ui.changed();
+                    },
+                    if learning { "Learning" } else { "Leisure" }
+                }
             }
         }
     }

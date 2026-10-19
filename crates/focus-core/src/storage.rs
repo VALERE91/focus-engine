@@ -12,6 +12,9 @@ use crate::error::{Error, Result};
 const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/001_init.sql"),
     include_str!("../migrations/002_tasks_and_outcome_log.sql"),
+    include_str!("../migrations/003_project_plans.sql"),
+    include_str!("../migrations/004_outcome_category.sql"),
+    include_str!("../migrations/005_week_ratings.sql"),
 ];
 
 /// A shared handle to the engine's SQLite database.

@@ -43,9 +43,11 @@ fn list_orders_by_status_then_name() {
     let names: Vec<_> = store.list().unwrap().into_iter().map(|p| p.name).collect();
     assert_eq!(names, ["alpha", "Beta", "zeta", "dead"]);
 
-    store.set_status("zeta", ProjectStatus::Finished).unwrap();
+    store
+        .set_status("zeta", ProjectStatus::Finished, 2)
+        .unwrap();
     assert_eq!(store.get("zeta").unwrap().status, ProjectStatus::Finished);
-    assert!(store.set_status("nope", ProjectStatus::Active).is_err());
+    assert!(store.set_status("nope", ProjectStatus::Active, 2).is_err());
 }
 
 #[test]
@@ -116,4 +118,50 @@ fn missing_note_file_reads_as_empty_and_is_recreated_by_dump() {
     assert_eq!(store.note(&p.slug).unwrap(), "");
     store.dump(&p.slug, "back", &now).unwrap();
     assert_eq!(store.note(&p.slug).unwrap(), "- 2026-10-18 21:30 back\n");
+}
+
+#[test]
+fn activation_needs_a_definition_of_done_and_a_free_slot() {
+    let (_tmp, store) = store();
+    let now = at("2026-10-18T09:00:00-04:00[America/Toronto]");
+    for name in ["One", "Two", "Three"] {
+        store.create(name, ProjectStatus::Idea, &now).unwrap();
+    }
+    assert!(matches!(
+        store.set_status("one", ProjectStatus::Active, 2),
+        Err(focus_core::Error::NoDefinitionOfDone)
+    ));
+    for slug in ["one", "two", "three"] {
+        store.set_plan(slug, "Shipped to users", "", 0).unwrap();
+    }
+    store.set_status("one", ProjectStatus::Active, 2).unwrap();
+    store.set_status("two", ProjectStatus::Active, 2).unwrap();
+    let err = store
+        .set_status("three", ProjectStatus::Active, 2)
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        focus_core::Error::TooManyActiveProjects { limit: 2, .. }
+    ));
+    assert!(err.to_string().contains("One, Two"));
+
+    // Re-saving an active project is not an activation.
+    store.set_status("one", ProjectStatus::Active, 2).unwrap();
+    // Pausing frees the slot.
+    store.set_status("one", ProjectStatus::Paused, 2).unwrap();
+    store.set_status("three", ProjectStatus::Active, 2).unwrap();
+}
+
+#[test]
+fn plans_are_stored_and_trimmed() {
+    let (_tmp, store) = store();
+    let now = at("2026-10-18T09:00:00-04:00[America/Toronto]");
+    store.create("Garden", ProjectStatus::Idea, &now).unwrap();
+    store
+        .set_plan("garden", "  Tomatoes in jars ", " Buy seeds ", 20)
+        .unwrap();
+    let p = store.get("garden").unwrap();
+    assert_eq!(p.definition_of_done, "Tomatoes in jars");
+    assert_eq!(p.next_action, "Buy seeds");
+    assert_eq!(p.next_action_minutes, 20);
 }

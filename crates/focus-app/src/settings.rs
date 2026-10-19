@@ -16,6 +16,8 @@ pub fn SettingsView() -> Element {
     let mut weekend = use_signal(|| initial.weekend_budget_minutes.to_string());
     let mut default_video = use_signal(|| initial.default_video_minutes.to_string());
     let mut interval = use_signal(|| initial.refresh_interval_minutes.to_string());
+    let mut max_active = use_signal(|| initial.max_active_projects.to_string());
+    let mut growth = use_signal(|| initial.growth_target_percent.to_string());
     let mut message = use_signal(String::new);
     // Uncontrolled inputs (see projects.rs), remounted after a save so they
     // show the values as clamped by the engine.
@@ -30,6 +32,8 @@ pub fn SettingsView() -> Element {
             weekend_budget_minutes: parse(weekend(), defaults.weekend_budget_minutes),
             default_video_minutes: parse(default_video(), defaults.default_video_minutes),
             refresh_interval_minutes: parse(interval(), defaults.refresh_interval_minutes),
+            max_active_projects: parse(max_active(), defaults.max_active_projects),
+            growth_target_percent: parse(growth(), defaults.growth_target_percent),
         };
         match engine.save_settings(wanted) {
             Ok(s) => {
@@ -37,6 +41,8 @@ pub fn SettingsView() -> Element {
                 weekend.set(s.weekend_budget_minutes.to_string());
                 default_video.set(s.default_video_minutes.to_string());
                 interval.set(s.refresh_interval_minutes.to_string());
+                max_active.set(s.max_active_projects.to_string());
+                growth.set(s.growth_target_percent.to_string());
                 form_gen += 1;
                 message.set("Saved.".into());
                 ui.changed();
@@ -55,12 +61,18 @@ pub fn SettingsView() -> Element {
                     NumberField { label: "Minutes counted when a video's length is unknown", value: default_video }
                     h2 { "Refresh" }
                     NumberField { label: "Check for new videos every (minutes, at least 15)", value: interval }
+                    h2 { "Growth" }
+                    NumberField { label: "Daily share of time on learning and projects to aim for (%)", value: growth }
+                    h2 { "Projects" }
+                    NumberField { label: "Projects active at the same time (at least 1)", value: max_active }
                 }
             }
             div { class: "settings-foot",
                 button { onclick: save, "Save" }
                 span { class: "muted", "{message}" }
             }
+            h2 { "Your weeks" }
+            WeeksTable {}
             h2 { "Your data" }
             p { class: "muted",
                 "Everything stays on this computer, in "
@@ -84,6 +96,43 @@ fn NumberField(label: &'static str, value: Signal<String>) -> Element {
                 min: "0",
                 initial_value: value.peek().clone(),
                 oninput: move |e| value.set(e.value()),
+            }
+        }
+    }
+}
+
+/// The last 8 weeks: what happened and how each one felt.
+#[component]
+fn WeeksTable() -> Element {
+    let engine = use_context::<Engine>();
+    use_context::<Ui>().watch();
+    let weeks = engine.weeks(8).unwrap_or_default();
+    rsx! {
+        table { class: "weeks",
+            thead {
+                tr {
+                    th { "Week" }
+                    th { "Video" }
+                    th { "Growth" }
+                    th { "Steps done" }
+                    th { "Well spent?" }
+                }
+            }
+            tbody {
+                for w in weeks {
+                    tr { key: "{w.week}",
+                        td { title: "{w.first_day} to {w.last_day}", "{w.week}" }
+                        td { "{w.video_minutes} min" }
+                        td { "{w.growth_minutes} min ({w.growth_percent()}%)" }
+                        td { "{w.actions_done}" }
+                        td {
+                            match w.rating {
+                                Some(r) => rsx! { "{r} / 5" },
+                                None => rsx! { span { class: "muted", "–" } },
+                            }
+                        }
+                    }
+                }
             }
         }
     }

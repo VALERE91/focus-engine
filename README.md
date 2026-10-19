@@ -31,11 +31,14 @@ If you already have a large export, choose its parts one by one: the app reads o
 
 ## Using it
 
-- **Feed:** new uploads from the last 14 days, newest first. Click a video to open it in your browser, where YouTube Premium applies. Opening counts as watched and charges its length to today's budget (read once from the video's public page; 15 minutes if it can't be found); **Undo** reverses it. **Watched** and **Not interested** hide a video without charging.
-- **Budget:** 60 minutes on weekdays and 120 on weekends by default, changeable in **Settings**. When it is spent, the feed shows your project notes instead.
-- **Projects:** each project has a status and one Markdown note, stored as `projects/<name>.md` in the data folder shown in **Settings**, so any editor can open it. The dump box appends a timestamped line.
+- **Now:** the app opens on "How much time do you have?". Pick 5, 15, 30 or 60 minutes and you get up to three suggestions: an active project's next step, or videos that fit the time and your remaining video budget. Each says why it was picked. Until about 30% of your day's minutes went to growth (learning videos and project work), growth comes first. **Start** a project step to run a timer, then mark it done (you're asked for the next step), partly done, or not done. **Not now** hides a suggestion for an hour.
+- **Videos:** every new upload from the last 14 days, newest first. Click a video to open it in your browser, where YouTube Premium applies. Opening counts as watched and charges its length to today's budget (read once from the video's public page; 15 minutes if it can't be found); **Undo** reverses it. **Watched** and **Not interested** hide a video without charging.
+- **Budget:** 60 minutes of video on weekdays and 120 on weekends by default. Time on projects never counts against it. When it is spent, the Videos tab shows your project notes instead.
+- **Projects:** each project has a status, a one-sentence definition of done, one next action with a time estimate, and a Markdown note stored as `projects/<name>.md` in the data folder (any editor can open it). At most 2 projects are active at once, and only projects with a definition of done can be active. The dump box appends a timestamped line to the note.
+- **Channels:** tick the channels to follow and mark the ones that teach you something as **Learning**; their videos count toward growth.
+- **Weekly check-in:** on the weekend (or early the next week), the Now screen asks "Was this week well spent?" next to a short summary. **Settings** lists your last 8 weeks, so you can see whether it's working.
 
-The feed refreshes when the app starts and every 30 minutes, and never asks YouTube about a channel more than once per 15 minutes.
+Budgets, the growth target and the active-project limit are all in **Settings**. The feed refreshes when the app starts and every 30 minutes, and never asks YouTube about a channel more than once per 15 minutes.
 
 ## Development
 

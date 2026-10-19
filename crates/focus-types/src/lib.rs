@@ -22,6 +22,41 @@ pub enum Category {
     Rest,
 }
 
+impl Category {
+    pub const ALL: [Category; 6] = [
+        Category::Leisure,
+        Category::Learning,
+        Category::MindGame,
+        Category::Production,
+        Category::Chores,
+        Category::Rest,
+    ];
+
+    /// Stable name used in storage, matching the WIT enum case.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Category::Leisure => "leisure",
+            Category::Learning => "learning",
+            Category::MindGame => "mind-game",
+            Category::Production => "production",
+            Category::Chores => "chores",
+            Category::Rest => "rest",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|c| c.as_str() == s)
+    }
+
+    /// The categories the growth share counts.
+    pub fn is_growth(self) -> bool {
+        matches!(
+            self,
+            Category::Learning | Category::MindGame | Category::Production
+        )
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Device {
@@ -172,6 +207,8 @@ pub struct Channel {
     /// May be empty until the first feed fetch fills it in.
     pub title: String,
     pub followed: bool,
+    /// `leisure` (default) or `learning`; its videos take this category.
+    pub category: Category,
 }
 
 /// Result of importing channels from a Takeout CSV or pasted text.
@@ -218,14 +255,88 @@ pub struct Feed {
     pub items: Vec<Task>,
 }
 
-/// User-editable settings. Every field has a default, so no config is needed.
+/// Today's minutes on growth versus everything recorded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GrowthStatus {
+    pub growth_minutes: u32,
+    pub total_minutes: u32,
+    pub target_percent: u32,
+}
+
+impl GrowthStatus {
+    /// 0 when nothing is recorded yet.
+    pub fn percent(&self) -> u32 {
+        (u64::from(self.growth_minutes) * 100)
+            .checked_div(u64::from(self.total_minutes))
+            .map_or(0, |p| p as u32)
+    }
+
+    pub fn below_target(&self) -> bool {
+        self.percent() < self.target_percent
+    }
+}
+
+/// The time slots the "What now?" screen offers, in minutes.
+pub const SLOT_MINUTES: [u32; 4] = [5, 15, 30, 60];
+
+/// One answer to "what now?": a task and why it was picked.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Suggestion {
+    pub task: Task,
+    pub reason: String,
+}
+
+/// What the "What now?" screen shows for a slot.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WhatNow {
+    pub minutes: u32,
+    pub budget: BudgetStatus,
+    pub growth: GrowthStatus,
+    /// At most 3, best first.
+    pub suggestions: Vec<Suggestion>,
+}
+
+/// One week for the check-in: what happened, and how it felt.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WeekSummary {
+    /// ISO week, e.g. `2026-W43`.
+    pub week: String,
+    /// Monday and Sunday, `YYYY-MM-DD`.
+    pub first_day: String,
+    pub last_day: String,
+    pub video_minutes: u32,
+    pub growth_minutes: u32,
+    pub total_minutes: u32,
+    /// Project next actions finished.
+    pub actions_done: u32,
+    /// "Was this week well spent?", 1 to 5.
+    pub rating: Option<u8>,
+}
+
+impl WeekSummary {
+    /// Growth share of the week, 0 when nothing was recorded.
+    pub fn growth_percent(&self) -> u32 {
+        (u64::from(self.growth_minutes) * 100)
+            .checked_div(u64::from(self.total_minutes))
+            .map_or(0, |p| p as u32)
+    }
+}
+
+/// User-editable settings. Every field has a default, so no config is
+/// needed, and settings saved by an older version gain the new defaults.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Settings {
     pub weekday_budget_minutes: u32,
     pub weekend_budget_minutes: u32,
     /// Charged when a video's duration is unknown.
     pub default_video_minutes: u32,
     pub refresh_interval_minutes: u32,
+    /// Projects that may be active at once.
+    pub max_active_projects: u32,
+    /// Daily share of minutes the policy aims to spend on growth
+    /// (learning, production, mind games), in percent.
+    pub growth_target_percent: u32,
 }
 
 impl Default for Settings {
@@ -235,6 +346,8 @@ impl Default for Settings {
             weekend_budget_minutes: 120,
             default_video_minutes: 15,
             refresh_interval_minutes: 30,
+            max_active_projects: 2,
+            growth_target_percent: 30,
         }
     }
 }
@@ -279,6 +392,12 @@ pub struct Project {
     pub slug: String,
     pub name: String,
     pub status: ProjectStatus,
+    /// One sentence saying what finished means; required to activate.
+    pub definition_of_done: String,
+    /// One concrete next step; empty when none is set.
+    pub next_action: String,
+    /// Estimate for the next action; 0 when unknown.
+    pub next_action_minutes: u32,
 }
 
 #[cfg(test)]
@@ -298,10 +417,37 @@ mod tests {
     }
 
     #[test]
+    fn category_round_trips() {
+        for c in Category::ALL {
+            assert_eq!(Category::parse(c.as_str()), Some(c));
+        }
+        assert!(Category::Production.is_growth());
+        assert!(!Category::Leisure.is_growth());
+    }
+
+    #[test]
     fn project_status_round_trips() {
         for s in ProjectStatus::ALL {
             assert_eq!(ProjectStatus::parse(s.as_str()), Some(s));
         }
+    }
+
+    #[test]
+    fn growth_percent_and_target() {
+        let g = GrowthStatus {
+            growth_minutes: 0,
+            total_minutes: 0,
+            target_percent: 30,
+        };
+        assert_eq!(g.percent(), 0);
+        assert!(g.below_target());
+        let g = GrowthStatus {
+            growth_minutes: 30,
+            total_minutes: 90,
+            ..g
+        };
+        assert_eq!(g.percent(), 33);
+        assert!(!g.below_target());
     }
 
     #[test]
