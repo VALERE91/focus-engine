@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use focus_types::{
-    BudgetStatus, Category, Channel, Ctx, Device, Feed, ImportReport, Outcome, Project,
-    ProjectStatus, Settings, Task, Verdict,
+    BudgetStatus, Category, Channel, Ctx, Device, Feed, GrowthStatus, ImportReport, Outcome,
+    Project, ProjectStatus, Settings, Task, Verdict, WhatNow,
 };
 use rusqlite::{OptionalExtension, params};
 
@@ -15,7 +15,8 @@ use crate::adapters::{Clock, SystemClock, SystemOpener, UrlOpener, default_data_
 use crate::budget;
 use crate::error::{Error, Result};
 use crate::http::{HttpClient, ReqwestHttp};
-use crate::projects::{ProjectStore, ProjectTasks};
+use crate::policy::{self, Candidate};
+use crate::projects::{self, ProjectStore, ProjectTasks};
 use crate::source::{RefreshReport, Source, SourceHost};
 use crate::storage::{Db, SqliteKv};
 use crate::takeout;
@@ -188,8 +189,8 @@ impl Engine {
             "SELECT task_json FROM tasks t
              WHERE t.source = ?2
                AND (t.expires_at IS NULL OR t.expires_at > ?1)
-               AND NOT EXISTS (
-                   SELECT 1 FROM outcomes o WHERE o.task_id = t.id AND o.undone_at IS NULL)
+               AND NOT EXISTS (SELECT 1 FROM outcomes o WHERE o.task_id = t.id
+                   AND o.verdict IN ('done', 'not-interested') AND o.undone_at IS NULL)
              ORDER BY t.position",
         )?;
         let items = stmt
@@ -197,6 +198,96 @@ impl Engine {
             .map(|json| Ok(serde_json::from_str(&json?)?))
             .collect::<Result<Vec<Task>>>()?;
         Ok(Feed { budget, items })
+    }
+
+    /// Up to 3 suggestions for a slot of `minutes`, with today's budget and
+    /// growth share. Videos must fit the slot and the remaining budget.
+    pub fn what_now(&self, minutes: u32) -> Result<WhatNow> {
+        let settings = self.settings()?;
+        let budget = self.budget()?;
+        let growth = self.growth()?;
+        let now = self.clock.now().timestamp().as_second();
+        let week_ago = now - 7 * 86_400;
+        let hour_ago = now - 3_600;
+        let three_days_ago = now - 3 * 86_400;
+
+        let conn = self.db.conn();
+        let mut skips = std::collections::HashMap::new();
+        {
+            let mut stmt = conn.prepare(
+                "SELECT task_id, COUNT(*), MAX(recorded_at) FROM outcomes
+                 WHERE verdict = 'skipped' AND undone_at IS NULL AND recorded_at >= ?1
+                 GROUP BY task_id",
+            )?;
+            for row in stmt.query_map([week_ago], |r| {
+                Ok((r.get::<_, String>(0)?, r.get(1)?, r.get::<_, i64>(2)?))
+            })? {
+                let (id, n, last): (String, u32, i64) = row?;
+                skips.insert(id, (n, last >= hour_ago));
+            }
+        }
+        let mut warm = std::collections::HashSet::new();
+        {
+            let mut stmt = conn.prepare(
+                "SELECT DISTINCT task_id FROM outcomes
+                 WHERE source = ?1 AND verdict IN ('done', 'partial')
+                   AND undone_at IS NULL AND recorded_at >= ?2",
+            )?;
+            for row in stmt.query_map(params![projects::NAME, three_days_ago], |r| {
+                r.get::<_, String>(0)
+            })? {
+                if let Some(slug) = projects::slug_of_task(&row?) {
+                    warm.insert(slug.to_owned());
+                }
+            }
+        }
+        let mut candidates = Vec::new();
+        {
+            let mut stmt = conn.prepare(
+                "SELECT source, task_json FROM tasks t
+                 WHERE (t.expires_at IS NULL OR t.expires_at > ?1)
+                   AND NOT EXISTS (SELECT 1 FROM outcomes o WHERE o.task_id = t.id
+                       AND o.verdict IN ('done', 'not-interested') AND o.undone_at IS NULL)",
+            )?;
+            for row in stmt.query_map([now], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+            })? {
+                let (source, json) = row?;
+                let task: Task = serde_json::from_str(&json)?;
+                candidates.push(Candidate {
+                    is_video: source == youtube::NAME,
+                    recent_skips: skips.get(&task.id).map_or(0, |s| s.0),
+                    just_skipped: skips.get(&task.id).is_some_and(|s| s.1),
+                    momentum: projects::slug_of_task(&task.id).is_some_and(|s| warm.contains(s)),
+                    task,
+                });
+            }
+        }
+        drop(conn);
+
+        let suggestions = policy::suggest(
+            candidates,
+            &policy::Context {
+                slot_minutes: minutes,
+                video_minutes_left: budget.remaining_minutes(),
+                default_video_minutes: settings.default_video_minutes,
+                growth,
+                now,
+                freshness_window_secs: youtube::MAX_AGE.as_secs(),
+            },
+        );
+        Ok(WhatNow {
+            minutes,
+            budget,
+            growth,
+            suggestions,
+        })
+    }
+
+    /// Today's growth share: minutes done or partly done, by category.
+    pub fn growth(&self) -> Result<GrowthStatus> {
+        let day = budget::day_key(&self.clock.now());
+        budget::growth_on(&self.db, &day, self.settings()?.growth_target_percent)
     }
 
     fn find_task(&self, task_id: &str) -> Result<(Arc<dyn Source>, Task)> {
@@ -221,25 +312,26 @@ impl Engine {
     fn record(
         &self,
         source: &dyn Source,
-        task_id: &str,
+        task: &Task,
         verdict: Verdict,
         minutes: u32,
     ) -> Result<()> {
         let now = self.clock.now();
         self.db.conn().execute(
-            "INSERT INTO outcomes (task_id, source, verdict, minutes, recorded_at, day)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO outcomes (task_id, source, verdict, minutes, recorded_at, day, category)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
-                task_id,
+                task.id,
                 source.describe().name,
                 verdict.as_str(),
                 minutes,
                 now.timestamp().as_second(),
                 budget::day_key(&now),
+                task.category.as_str(),
             ],
         )?;
         source.on_outcome(&Outcome {
-            task_id: task_id.to_owned(),
+            task_id: task.id.clone(),
             verdict,
             score: None,
             minutes,
@@ -257,19 +349,36 @@ impl Engine {
             .ok_or_else(|| Error::NothingToOpen(task_id.to_owned()))?;
         self.opener.open(url)?;
         let minutes = budget::charge_for(task.est_minutes, &self.settings()?);
-        self.record(source.as_ref(), task_id, Verdict::Done, minutes)?;
+        self.record(source.as_ref(), &task, Verdict::Done, minutes)?;
         Ok(minutes)
     }
 
     /// Marks a task as watched elsewhere. Only opening charges the budget.
     pub fn mark_watched(&self, task_id: &str) -> Result<()> {
-        let (source, _) = self.find_task(task_id)?;
-        self.record(source.as_ref(), task_id, Verdict::Done, 0)
+        let (source, task) = self.find_task(task_id)?;
+        self.record(source.as_ref(), &task, Verdict::Done, 0)
     }
 
     pub fn mark_not_interested(&self, task_id: &str) -> Result<()> {
-        let (source, _) = self.find_task(task_id)?;
-        self.record(source.as_ref(), task_id, Verdict::NotInterested, 0)
+        let (source, task) = self.find_task(task_id)?;
+        self.record(source.as_ref(), &task, Verdict::NotInterested, 0)
+    }
+
+    /// "Not now": the task stays available but ranks lower for a week.
+    pub fn skip_task(&self, task_id: &str) -> Result<()> {
+        let (source, task) = self.find_task(task_id)?;
+        self.record(source.as_ref(), &task, Verdict::Skipped, 0)
+    }
+
+    /// Ends a work session on a task: `Done` removes it (a project then
+    /// needs its next action), `Partial` keeps it. `minutes` worked count
+    /// toward today's growth share.
+    pub fn finish_task(&self, task_id: &str, verdict: Verdict, minutes: u32) -> Result<()> {
+        if !matches!(verdict, Verdict::Done | Verdict::Partial) {
+            return Err(Error::InvalidVerdict(verdict.as_str()));
+        }
+        let (source, task) = self.find_task(task_id)?;
+        self.record(source.as_ref(), &task, verdict, minutes)
     }
 
     /// Reverses the outcome: the task returns to the feed and any minutes
@@ -305,6 +414,7 @@ impl Engine {
                 .refresh_interval_minutes
                 .max(MIN_REFRESH_INTERVAL_MINUTES),
             max_active_projects: settings.max_active_projects.max(1),
+            growth_target_percent: settings.growth_target_percent.min(100),
             ..settings
         };
         budget::save_settings(&self.db, &settings)?;
@@ -331,6 +441,13 @@ impl Engine {
         let max_active = self.settings()?.max_active_projects;
         self.projects.set_status(slug, status, max_active)?;
         self.sync_tasks()
+    }
+
+    /// Replaces a project's next action, keeping its definition of done
+    /// (used right after finishing the previous one).
+    pub fn set_next_action(&self, slug: &str, next_action: &str, minutes: u32) -> Result<()> {
+        let project = self.projects.get(slug)?;
+        self.set_project_plan(slug, &project.definition_of_done, next_action, minutes)
     }
 
     /// Sets what "done" means and the one next action (with an estimate in

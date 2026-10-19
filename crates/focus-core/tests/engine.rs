@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use common::*;
 use focus_core::{Engine, EngineDeps};
-use focus_types::{ProjectStatus, Settings};
+use focus_types::{ProjectStatus, Settings, Verdict};
 
 const UULF: &str = "UULFsXVk37bltHxD1rDPwtNM8Q";
 const VIDEO_A: &str = "youtube:aaaaaaaaaa1";
@@ -148,11 +148,13 @@ async fn settings_are_clamped_and_persist_across_reopen() {
             default_video_minutes: 0,
             refresh_interval_minutes: 1,
             max_active_projects: 0,
+            growth_target_percent: 250,
         })
         .unwrap();
     assert_eq!(saved.default_video_minutes, 1);
     assert_eq!(saved.refresh_interval_minutes, 15);
     assert_eq!(saved.max_active_projects, 1);
+    assert_eq!(saved.growth_target_percent, 100);
 
     let reopened = Engine::open(
         f.engine.data_dir(),
@@ -316,4 +318,116 @@ async fn channel_category_reaches_the_cached_tasks() {
             .iter()
             .all(|t| t.category == focus_types::Category::Learning)
     );
+}
+
+/// An engine with the two leisure videos and one active project whose next
+/// action takes 25 minutes.
+async fn focus_fixture() -> Fixture {
+    let f = fixture_at(FRIDAY_EVENING).await;
+    let p = f
+        .engine
+        .create_project("Book", ProjectStatus::Idea)
+        .unwrap();
+    f.engine
+        .set_project_plan(&p.slug, "Draft sent to the editor", "Outline chapter 1", 25)
+        .unwrap();
+    f.engine
+        .set_project_status(&p.slug, ProjectStatus::Active)
+        .unwrap();
+    f
+}
+
+const ACTION: &str = "projects:book:1";
+
+fn suggestion_ids(w: &focus_types::WhatNow) -> Vec<&str> {
+    w.suggestions.iter().map(|s| s.task.id.as_str()).collect()
+}
+
+#[tokio::test]
+async fn what_now_mixes_the_next_action_with_videos_that_fit() {
+    let f = focus_fixture().await;
+    let w = f.engine.what_now(30).unwrap();
+    // Growth is at 0%: the project's next action leads; both 15-min
+    // (unknown length) videos fit 30 min and the 60-min budget.
+    assert_eq!(suggestion_ids(&w), [ACTION, VIDEO_A, VIDEO_B]);
+    assert_eq!(
+        w.suggestions[0].reason,
+        "Next step for Book · about 25 min · growth is at 0% today, target 30%"
+    );
+    // In 5 minutes no video fits, but the project still does.
+    assert_eq!(suggestion_ids(&f.engine.what_now(5).unwrap()), [ACTION]);
+}
+
+#[tokio::test]
+async fn project_time_counts_for_growth_not_for_the_video_budget() {
+    let f = focus_fixture().await;
+    f.engine.open_task(VIDEO_A).unwrap(); // 15 leisure minutes
+    f.engine.finish_task(ACTION, Verdict::Partial, 20).unwrap();
+    assert_eq!(f.engine.budget().unwrap().spent_minutes, 15);
+    let g = f.engine.growth().unwrap();
+    assert_eq!(
+        (g.growth_minutes, g.total_minutes, g.percent()),
+        (20, 35, 57)
+    );
+
+    // Partly done keeps the action, now with momentum, and growth is above
+    // target so its reason no longer mentions the gap.
+    let w = f.engine.what_now(30).unwrap();
+    assert_eq!(w.suggestions[0].task.id, ACTION);
+    assert_eq!(
+        w.suggestions[0].reason,
+        "Next step for Book · about 25 min · you worked on it recently"
+    );
+    assert!(f.engine.finish_task(ACTION, Verdict::Skipped, 0).is_err());
+}
+
+#[tokio::test]
+async fn done_removes_the_action_until_a_new_one_is_set() {
+    let f = focus_fixture().await;
+    f.engine.finish_task(ACTION, Verdict::Done, 25).unwrap();
+    assert!(!suggestion_ids(&f.engine.what_now(30).unwrap()).contains(&ACTION));
+    f.engine
+        .set_next_action("book", "Outline chapter 2", 30)
+        .unwrap();
+    let w = f.engine.what_now(30).unwrap();
+    assert_eq!(w.suggestions[0].task.id, "projects:book:2");
+    assert_eq!(w.suggestions[0].task.title, "Outline chapter 2");
+    assert_eq!(
+        f.engine.projects().unwrap()[0].definition_of_done,
+        "Draft sent to the editor"
+    );
+    // Undo refunds the minutes; the new next action stays the current one.
+    f.engine.undo(ACTION).unwrap();
+    assert!(f.engine.growth().unwrap().growth_minutes == 0);
+}
+
+#[tokio::test]
+async fn skipping_means_not_now() {
+    let f = focus_fixture().await;
+    f.engine.skip_task(ACTION).unwrap();
+    f.engine.skip_task(VIDEO_A).unwrap();
+    // Not right now: both wait an hour.
+    assert_eq!(suggestion_ids(&f.engine.what_now(30).unwrap()), [VIDEO_B]);
+    // A skipped video stays in the video feed.
+    assert_eq!(feed_ids(&f.engine), [VIDEO_A, VIDEO_B]);
+    // After an hour they are back, the skipped video now ranked below the
+    // one that was not skipped.
+    f.clock.advance_mins(61);
+    assert_eq!(
+        suggestion_ids(&f.engine.what_now(30).unwrap()),
+        [ACTION, VIDEO_B, VIDEO_A]
+    );
+}
+
+#[tokio::test]
+async fn a_spent_budget_leaves_only_non_video_suggestions() {
+    let f = focus_fixture().await;
+    f.engine.open_task(VIDEO_A).unwrap();
+    f.engine
+        .save_settings(focus_types::Settings {
+            weekday_budget_minutes: 15,
+            ..focus_types::Settings::default()
+        })
+        .unwrap();
+    assert_eq!(suggestion_ids(&f.engine.what_now(60).unwrap()), [ACTION]);
 }

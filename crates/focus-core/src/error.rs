@@ -45,6 +45,8 @@ pub enum Error {
          first, or raise the limit in Settings."
     )]
     TooManyActiveProjects { limit: u32, active: String },
+    #[error("a work session ends as done or partly done, not {0}")]
+    InvalidVerdict(&'static str),
     #[error("project name is empty")]
     EmptyName,
 }

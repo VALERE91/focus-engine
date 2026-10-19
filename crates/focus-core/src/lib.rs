@@ -6,6 +6,7 @@ pub mod budget;
 mod engine;
 pub mod error;
 pub mod http;
+pub mod policy;
 pub mod projects;
 pub mod source;
 pub mod storage;

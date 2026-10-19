@@ -3,6 +3,7 @@
 
 mod channels;
 mod feed;
+mod now;
 mod projects;
 mod settings;
 
@@ -34,6 +35,7 @@ fn desktop_config() -> dioxus::desktop::Config {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
+    Now,
     Feed,
     Channels,
     Projects,
@@ -56,6 +58,8 @@ pub struct Ui {
     pub status: Signal<String>,
     pub refreshing: Signal<bool>,
     pub undo: Signal<Option<UndoToast>>,
+    /// A running work session, kept across tab switches.
+    pub session: Signal<Option<now::Session>>,
 }
 
 impl Ui {
@@ -144,10 +148,11 @@ fn Shell() -> Element {
     });
     let ui = use_context_provider(|| Ui {
         version: Signal::new(0),
-        tab: Signal::new(Tab::Feed),
+        tab: Signal::new(Tab::Now),
         status: Signal::new(String::new()),
         refreshing: Signal::new(false),
         undo: Signal::new(None),
+        session: Signal::new(None),
     });
 
     // Refresh on start, then on the configured timer.
@@ -184,21 +189,23 @@ fn Shell() -> Element {
         header { class: "top",
             span { class: "brand", "Focus Engine" }
             nav {
-                {nav(Tab::Feed, "Feed")}
-                {nav(Tab::Channels, "Channels")}
+                {nav(Tab::Now, if ui.session.read().is_some() { "Now ●" } else { "Now" })}
+                {nav(Tab::Feed, "Videos")}
                 {nav(Tab::Projects, "Projects")}
+                {nav(Tab::Channels, "Channels")}
                 {nav(Tab::Settings, "Settings")}
             }
         }
         main {
             match tab() {
+                Tab::Now => rsx! { now::NowView {} },
                 Tab::Feed => rsx! { feed::FeedView {} },
                 Tab::Channels => rsx! { channels::ChannelsView {} },
                 Tab::Projects => rsx! { projects::ProjectsView {} },
                 Tab::Settings => rsx! { settings::SettingsView {} },
             }
         }
-        if tab() == Tab::Feed {
+        if matches!(tab(), Tab::Now | Tab::Feed) {
             UndoBar {}
         }
         footer { class: "status", "{ui.status}" }

@@ -1,7 +1,7 @@
 //! The daily video budget. Opening a video charges its duration (or the
 //! default) to the local day on which it was opened.
 
-use focus_types::{BudgetStatus, Settings, Verdict};
+use focus_types::{BudgetStatus, Category, GrowthStatus, Settings, Verdict};
 use jiff::Zoned;
 use jiff::civil::{Date, Weekday};
 use rusqlite::params;
@@ -31,15 +31,40 @@ pub fn charge_for(est_minutes: u32, settings: &Settings) -> u32 {
     }
 }
 
-/// Minutes already spent on `day` (only hand-offs count, undone ones not).
+/// Video minutes already spent on `day`: hand-offs only, undone ones not,
+/// and time on other tasks (projects) never counts.
 pub fn spent_on(db: &Db, day: &str) -> Result<u32> {
     let total: i64 = db.conn().query_row(
         "SELECT COALESCE(SUM(minutes), 0) FROM outcomes
-         WHERE day = ?1 AND verdict = ?2 AND undone_at IS NULL",
-        params![day, Verdict::Done.as_str()],
+         WHERE day = ?1 AND verdict = ?2 AND source = ?3 AND undone_at IS NULL",
+        params![day, Verdict::Done.as_str(), crate::youtube::NAME],
         |r| r.get(0),
     )?;
     Ok(u32::try_from(total).unwrap_or(u32::MAX))
+}
+
+/// Minutes recorded on `day` (done or partly done), split by growth.
+pub fn growth_on(db: &Db, day: &str, target_percent: u32) -> Result<GrowthStatus> {
+    let conn = db.conn();
+    let mut stmt = conn.prepare(
+        "SELECT category, COALESCE(SUM(minutes), 0) FROM outcomes
+         WHERE day = ?1 AND verdict IN ('done', 'partial') AND undone_at IS NULL
+         GROUP BY category",
+    )?;
+    let mut growth = GrowthStatus {
+        growth_minutes: 0,
+        total_minutes: 0,
+        target_percent,
+    };
+    for row in stmt.query_map([day], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))? {
+        let (category, minutes) = row?;
+        let minutes = u32::try_from(minutes).unwrap_or(u32::MAX);
+        growth.total_minutes = growth.total_minutes.saturating_add(minutes);
+        if Category::parse(&category).is_some_and(Category::is_growth) {
+            growth.growth_minutes = growth.growth_minutes.saturating_add(minutes);
+        }
+    }
+    Ok(growth)
 }
 
 pub fn status(db: &Db, now: &Zoned, settings: &Settings) -> Result<BudgetStatus> {

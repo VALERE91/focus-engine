@@ -255,6 +255,47 @@ pub struct Feed {
     pub items: Vec<Task>,
 }
 
+/// Today's minutes on growth versus everything recorded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GrowthStatus {
+    pub growth_minutes: u32,
+    pub total_minutes: u32,
+    pub target_percent: u32,
+}
+
+impl GrowthStatus {
+    /// 0 when nothing is recorded yet.
+    pub fn percent(&self) -> u32 {
+        (u64::from(self.growth_minutes) * 100)
+            .checked_div(u64::from(self.total_minutes))
+            .map_or(0, |p| p as u32)
+    }
+
+    pub fn below_target(&self) -> bool {
+        self.percent() < self.target_percent
+    }
+}
+
+/// The time slots the "What now?" screen offers, in minutes.
+pub const SLOT_MINUTES: [u32; 4] = [5, 15, 30, 60];
+
+/// One answer to "what now?": a task and why it was picked.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Suggestion {
+    pub task: Task,
+    pub reason: String,
+}
+
+/// What the "What now?" screen shows for a slot.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WhatNow {
+    pub minutes: u32,
+    pub budget: BudgetStatus,
+    pub growth: GrowthStatus,
+    /// At most 3, best first.
+    pub suggestions: Vec<Suggestion>,
+}
+
 /// User-editable settings. Every field has a default, so no config is
 /// needed, and settings saved by an older version gain the new defaults.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -267,6 +308,9 @@ pub struct Settings {
     pub refresh_interval_minutes: u32,
     /// Projects that may be active at once.
     pub max_active_projects: u32,
+    /// Daily share of minutes the policy aims to spend on growth
+    /// (learning, production, mind games), in percent.
+    pub growth_target_percent: u32,
 }
 
 impl Default for Settings {
@@ -277,6 +321,7 @@ impl Default for Settings {
             default_video_minutes: 15,
             refresh_interval_minutes: 30,
             max_active_projects: 2,
+            growth_target_percent: 30,
         }
     }
 }
@@ -359,6 +404,24 @@ mod tests {
         for s in ProjectStatus::ALL {
             assert_eq!(ProjectStatus::parse(s.as_str()), Some(s));
         }
+    }
+
+    #[test]
+    fn growth_percent_and_target() {
+        let g = GrowthStatus {
+            growth_minutes: 0,
+            total_minutes: 0,
+            target_percent: 30,
+        };
+        assert_eq!(g.percent(), 0);
+        assert!(g.below_target());
+        let g = GrowthStatus {
+            growth_minutes: 30,
+            total_minutes: 90,
+            ..g
+        };
+        assert_eq!(g.percent(), 33);
+        assert!(!g.below_target());
     }
 
     #[test]

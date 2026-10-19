@@ -124,7 +124,7 @@ In the prototype only the video budget exists. A hand-off is charged to the loca
 - Videos must fit both the slot and the remaining video budget; a project next action always fits, since the user can work on part of it for the slot.
 - Score = fit to the slot (0 to 1) + 1 if the task is growth (`learning`, `production`, `mind-game`) while today's growth share is under target (default 30% of minutes, adjustable) + 0.5 momentum for a project worked on in the last 3 days + up to 0.3 novelty for recent videos − 0.5 per skip in the last 7 days. Ties go to the task id.
 - Up to 3 suggestions: the best task, then the best of another category, then the best remaining; each says why it was picked.
-- Outcomes: done and not interested remove a task; partial keeps it; skipped only lowers its score. The video budget counts video minutes only; growth share counts every minute recorded today.
+- Outcomes: done and not interested remove a task; partial keeps it; skipped means "not now": the task leaves the suggestions for an hour, then only ranks lower for the rest of the week. The video budget counts video minutes only; growth share counts every minute recorded today.
 
 **Growth ramp.** A target share of `learning` + `mind-game` + `production` per mode, raised by a few points per week (for example 20%, 25%, 30%), capped by the user.
 
