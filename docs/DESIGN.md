@@ -100,7 +100,7 @@ Everything reduces to six entities: events open slots, extensions fill queues wi
 
 **Storage:** SQLite (WAL mode), one file, easy to back up. Content blocks stored as JSON. Notes are plain Markdown files next to it.
 
-Current tables: `tasks` is the engine's cache of each source's candidates (the full task as JSON, plus source order and `expires_at`), rewritten after every refresh or change of followed channels, so the feed is one query and a task leaves on time without a refresh. `outcomes` is an append-only log; undo sets `undone_at` instead of deleting, so history is kept for skip rates and rewatch scoring. `source_kv` holds each source's private key-value data (the WIT `kv-get`/`kv-set`), and `projects` and `settings` the rest.
+Current tables: `tasks` is the engine's cache of each source's candidates (the full task as JSON, plus source order and `expires_at`), rewritten after every refresh or change of followed channels, so the feed is one query and a task leaves on time without a refresh. `outcomes` is an append-only log; undo sets `undone_at` instead of deleting, so history is kept for skip rates and rewatch scoring. `source_kv` holds each source's private key-value data (the WIT `kv-*` functions); the YouTube source keeps one key per channel, follow flag and video, and converts its earlier whole-list layout on start. `projects` and `settings` hold the rest.
 
 ## Policy engine
 

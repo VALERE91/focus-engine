@@ -2,9 +2,10 @@ mod common;
 
 use common::*;
 use focus_core::source::Source;
-use focus_core::youtube::YouTubeSource;
+use focus_core::storage::KvStore;
 use focus_core::youtube::feed::parse_feed;
 use focus_core::youtube::import::{PastedEntry, parse_pasted, parse_takeout_csv};
+use focus_core::youtube::{KEEP_PER_CHANNEL, StoredVideo, YouTubeSource};
 use focus_types::{Ctx, Device};
 
 const UULF: &str = "UULFsXVk37bltHxD1rDPwtNM8Q";
@@ -358,4 +359,124 @@ async fn pasted_channel_gets_its_title_from_the_feed() {
     assert_eq!(src.channels()[0].title, "");
     src.refresh().await;
     assert_eq!(src.channels()[0].title, "Kurzgesagt – In a Nutshell");
+}
+
+// ----- Storage layout ------------------------------------------------------
+
+#[tokio::test]
+async fn one_key_per_channel_follow_flag_and_video() {
+    let http = MockHttp::new();
+    http.ok(feed_url(UULF), fixture("uulf_feed.xml"));
+    let (host, kv) = host_with_kv(http, TestClock::new());
+    let src = YouTubeSource::new(host);
+    src.import_takeout_csv(&fixture("takeout_subscriptions.csv"));
+    assert_eq!(kv.list_keys("channel:").len(), 5);
+    assert!(kv.list_keys("followed:").is_empty());
+
+    src.set_followed(KURZ, true);
+    src.set_followed("UCnotachannelweknowabout", true);
+    assert_eq!(kv.list_keys("followed:"), [format!("followed:{KURZ}")]);
+
+    src.refresh().await;
+    assert_eq!(
+        kv.list_keys(&format!("video:{KURZ}:")),
+        [
+            format!("video:{KURZ}:aaaaaaaaaa1"),
+            format!("video:{KURZ}:bbbbbbbbbb2"),
+            format!("video:{KURZ}:cccccccccc3"),
+        ]
+    );
+    // The feed's channel name replaced the Takeout one without touching
+    // the follow flag.
+    assert!(src.channels().iter().any(|c| c.id == KURZ && c.followed));
+
+    src.set_followed(KURZ, false);
+    assert!(kv.list_keys("followed:").is_empty());
+}
+
+#[tokio::test]
+async fn keeps_the_newest_videos_per_channel() {
+    let http = MockHttp::new();
+    http.ok(feed_url(UULF), fixture("uulf_feed.xml"));
+    let (host, kv) = host_with_kv(http, TestClock::new());
+    let src = YouTubeSource::new(host);
+    src.import_pasted(KURZ).await;
+    // 60 uploads from 2025, older than everything in the feed.
+    let old: Vec<(String, Vec<u8>)> = (0..60)
+        .map(|i| {
+            let v = StoredVideo {
+                id: format!("old{i:08}"),
+                title: format!("Old {i}"),
+                published: Some(1_735_689_600 + i),
+                thumbnail: None,
+                duration_secs: None,
+                in_uulf: true,
+                first_seen: 1_735_689_600,
+            };
+            (
+                format!("video:{KURZ}:{}", v.id),
+                serde_json::to_vec(&v).unwrap(),
+            )
+        })
+        .collect();
+    kv.set_many(&old);
+
+    src.refresh().await;
+    let keys = kv.list_keys(&format!("video:{KURZ}:"));
+    assert_eq!(keys.len(), KEEP_PER_CHANNEL);
+    for id in ["aaaaaaaaaa1", "bbbbbbbbbb2", "cccccccccc3", "old00000059"] {
+        assert!(keys.contains(&format!("video:{KURZ}:{id}")), "{id} kept");
+    }
+    // The 13 oldest of the 63 are gone.
+    assert!(!keys.contains(&format!("video:{KURZ}:old00000012")));
+    assert!(keys.contains(&format!("video:{KURZ}:old00000013")));
+}
+
+#[tokio::test]
+async fn layout_1_lists_are_converted_on_start() {
+    let http = MockHttp::new();
+    let (host, kv) = host_with_kv(http.clone(), TestClock::new());
+    // What version 0.1 stored: whole lists under two kinds of keys.
+    kv.set(
+        "channels",
+        format!(
+            r#"[{{"id":"{KURZ}","title":"Kurzgesagt","followed":true}},
+                {{"id":"UCYO_jab_esuFRV4b17AJtAw","title":"3Blue1Brown","followed":false}}]"#
+        )
+        .as_bytes(),
+    );
+    kv.set(
+        &format!("videos:{KURZ}"),
+        br#"[{"id":"aaaaaaaaaa1","title":"Explosion","published":1792072800,
+              "thumbnail":null,"duration_secs":null,"in_uulf":true,"first_seen":1792072800}]"#,
+    );
+    kv.set("shorts:aaaaaaaaaa1", b"regular");
+
+    let src = YouTubeSource::new(host);
+    let channels = src.channels();
+    assert_eq!(channels.len(), 2);
+    assert_eq!(channels[0].title, "3Blue1Brown");
+    assert!(!channels[0].followed);
+    assert!(channels[1].followed);
+    assert_eq!(candidate_ids(&src), ["youtube:aaaaaaaaaa1"]);
+    assert_eq!(kv.get("channels"), None);
+    assert_eq!(kv.get(&format!("videos:{KURZ}")), None);
+    assert_eq!(kv.get("layout").as_deref(), Some(&b"2"[..]));
+    // Cached Shorts checks carry over untouched: no new request needed.
+    assert!(http.take_requests().is_empty());
+
+    // Starting again is a no-op.
+    let again = YouTubeSource::new(host_from(kv.clone(), http));
+    assert_eq!(again.channels(), channels);
+}
+
+fn host_from(
+    kv: std::sync::Arc<focus_core::storage::SqliteKv>,
+    http: std::sync::Arc<MockHttp>,
+) -> focus_core::source::SourceHost {
+    focus_core::source::SourceHost {
+        kv,
+        http,
+        clock: TestClock::new(),
+    }
 }
