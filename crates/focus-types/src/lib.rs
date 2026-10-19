@@ -296,6 +296,32 @@ pub struct WhatNow {
     pub suggestions: Vec<Suggestion>,
 }
 
+/// One week for the check-in: what happened, and how it felt.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WeekSummary {
+    /// ISO week, e.g. `2026-W43`.
+    pub week: String,
+    /// Monday and Sunday, `YYYY-MM-DD`.
+    pub first_day: String,
+    pub last_day: String,
+    pub video_minutes: u32,
+    pub growth_minutes: u32,
+    pub total_minutes: u32,
+    /// Project next actions finished.
+    pub actions_done: u32,
+    /// "Was this week well spent?", 1 to 5.
+    pub rating: Option<u8>,
+}
+
+impl WeekSummary {
+    /// Growth share of the week, 0 when nothing was recorded.
+    pub fn growth_percent(&self) -> u32 {
+        (u64::from(self.growth_minutes) * 100)
+            .checked_div(u64::from(self.total_minutes))
+            .map_or(0, |p| p as u32)
+    }
+}
+
 /// User-editable settings. Every field has a default, so no config is
 /// needed, and settings saved by an older version gain the new defaults.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

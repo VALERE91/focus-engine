@@ -431,3 +431,52 @@ async fn a_spent_budget_leaves_only_non_video_suggestions() {
         .unwrap();
     assert_eq!(suggestion_ids(&f.engine.what_now(60).unwrap()), [ACTION]);
 }
+
+#[tokio::test]
+async fn weekly_checkin_summarizes_and_asks_once() {
+    let f = focus_fixture().await; // Friday 2026-10-16, ISO week 42
+    f.engine.open_task(VIDEO_A).unwrap();
+    f.engine.finish_task(ACTION, Verdict::Partial, 20).unwrap();
+    f.engine.finish_task(ACTION, Verdict::Done, 10).unwrap();
+    assert_eq!(
+        f.engine.weekly_checkin().unwrap(),
+        None,
+        "not asked on Friday"
+    );
+
+    f.clock.set("2026-10-17T10:00:00-04:00[America/Toronto]");
+    let week = f
+        .engine
+        .weekly_checkin()
+        .unwrap()
+        .expect("asked on Saturday");
+    assert_eq!(week.week, "2026-W42");
+    assert_eq!(
+        (week.first_day.as_str(), week.last_day.as_str()),
+        ("2026-10-12", "2026-10-18")
+    );
+    assert_eq!(
+        (
+            week.video_minutes,
+            week.growth_minutes,
+            week.total_minutes,
+            week.actions_done
+        ),
+        (15, 30, 45, 1)
+    );
+    assert_eq!(week.growth_percent(), 66);
+
+    f.engine.rate_week(&week.week, 4).unwrap();
+    assert_eq!(f.engine.weekly_checkin().unwrap(), None);
+    // Monday asks about the week just ended, which is already rated.
+    f.clock.set("2026-10-19T09:00:00-04:00[America/Toronto]");
+    assert_eq!(f.engine.weekly_checkin().unwrap(), None);
+
+    let weeks = f.engine.weeks(2).unwrap();
+    assert_eq!(weeks[0].week, "2026-W43");
+    assert_eq!(weeks[0].total_minutes, 0);
+    assert_eq!(
+        (weeks[1].week.as_str(), weeks[1].rating),
+        ("2026-W42", Some(4))
+    );
+}

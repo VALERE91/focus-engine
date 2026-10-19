@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use focus_types::{
     BudgetStatus, Category, Channel, Ctx, Device, Feed, GrowthStatus, ImportReport, Outcome,
-    Project, ProjectStatus, Settings, Task, Verdict, WhatNow,
+    Project, ProjectStatus, Settings, Task, Verdict, WeekSummary, WhatNow,
 };
 use rusqlite::{OptionalExtension, params};
 
@@ -17,6 +17,7 @@ use crate::error::{Error, Result};
 use crate::http::{HttpClient, ReqwestHttp};
 use crate::policy::{self, Candidate};
 use crate::projects::{self, ProjectStore, ProjectTasks};
+use crate::review;
 use crate::source::{RefreshReport, Source, SourceHost};
 use crate::storage::{Db, SqliteKv};
 use crate::takeout;
@@ -394,6 +395,37 @@ impl Engine {
     /// Opens a page (help, Google Takeout) in the default browser.
     pub fn open_link(&self, url: &str) -> Result<()> {
         self.opener.open(url)
+    }
+
+    // ----- weekly check-in ----------------------------------------------
+
+    /// The week to rate now, if one is due and not rated yet: the current
+    /// week on Saturday and Sunday, the previous one on Monday and Tuesday.
+    pub fn weekly_checkin(&self) -> Result<Option<WeekSummary>> {
+        let Some(day) = review::week_to_ask_about(self.clock.now().date()) else {
+            return Ok(None);
+        };
+        let summary = review::summary(&self.db, day)?;
+        Ok(summary.rating.is_none().then_some(summary))
+    }
+
+    /// The last `count` weeks, the current one first.
+    pub fn weeks(&self, count: usize) -> Result<Vec<WeekSummary>> {
+        let today = self.clock.now().date();
+        (0..count)
+            .map_while(|i| today.checked_sub(jiff::Span::new().weeks(i as i64)).ok())
+            .map(|day| review::summary(&self.db, day))
+            .collect()
+    }
+
+    /// "Was this week well spent?", 1 to 5; rating again replaces it.
+    pub fn rate_week(&self, week: &str, rating: u8) -> Result<()> {
+        review::rate(
+            &self.db,
+            week,
+            rating,
+            self.clock.now().timestamp().as_second(),
+        )
     }
 
     // ----- budget and settings ------------------------------------------

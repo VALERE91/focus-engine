@@ -8,6 +8,7 @@ pub mod error;
 pub mod http;
 pub mod policy;
 pub mod projects;
+pub mod review;
 pub mod source;
 pub mod storage;
 pub mod takeout;

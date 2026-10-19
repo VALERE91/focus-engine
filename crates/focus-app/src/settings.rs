@@ -71,6 +71,8 @@ pub fn SettingsView() -> Element {
                 button { onclick: save, "Save" }
                 span { class: "muted", "{message}" }
             }
+            h2 { "Your weeks" }
+            WeeksTable {}
             h2 { "Your data" }
             p { class: "muted",
                 "Everything stays on this computer, in "
@@ -94,6 +96,43 @@ fn NumberField(label: &'static str, value: Signal<String>) -> Element {
                 min: "0",
                 initial_value: value.peek().clone(),
                 oninput: move |e| value.set(e.value()),
+            }
+        }
+    }
+}
+
+/// The last 8 weeks: what happened and how each one felt.
+#[component]
+fn WeeksTable() -> Element {
+    let engine = use_context::<Engine>();
+    use_context::<Ui>().watch();
+    let weeks = engine.weeks(8).unwrap_or_default();
+    rsx! {
+        table { class: "weeks",
+            thead {
+                tr {
+                    th { "Week" }
+                    th { "Video" }
+                    th { "Growth" }
+                    th { "Steps done" }
+                    th { "Well spent?" }
+                }
+            }
+            tbody {
+                for w in weeks {
+                    tr { key: "{w.week}",
+                        td { title: "{w.first_day} to {w.last_day}", "{w.week}" }
+                        td { "{w.video_minutes} min" }
+                        td { "{w.growth_minutes} min ({w.growth_percent()}%)" }
+                        td { "{w.actions_done}" }
+                        td {
+                            match w.rating {
+                                Some(r) => rsx! { "{r} / 5" },
+                                None => rsx! { span { class: "muted", "–" } },
+                            }
+                        }
+                    }
+                }
             }
         }
     }

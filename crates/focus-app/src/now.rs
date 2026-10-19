@@ -77,6 +77,7 @@ pub fn NowView() -> Element {
                     span { "Video left today: {b.remaining_minutes()} min" }
                 }
             }
+            CheckinCard {}
             if let Some((slug, name)) = next_for() {
                 NextActionPrompt { slug, name, next_for }
             }
@@ -311,6 +312,47 @@ fn NextActionPrompt(
                     "Save"
                 }
                 button { class: "quiet", onclick: move |_| next_for.set(None), "Later" }
+            }
+        }
+    }
+}
+
+/// "Was this week well spent?", shown on the weekend and early in the
+/// following week until answered.
+#[component]
+fn CheckinCard() -> Element {
+    let engine = use_context::<Engine>();
+    let ui = use_context::<Ui>();
+    // No props, so subscribe explicitly or a rating would not hide the card.
+    ui.watch();
+    let Ok(Some(week)) = engine.weekly_checkin() else {
+        return rsx! {};
+    };
+    rsx! {
+        div { class: "checkin",
+            p { class: "checkin-q", "Was this week well spent?" }
+            p { class: "muted",
+                "{week.first_day} to {week.last_day}: {week.video_minutes} min of video, "
+                "{week.growth_minutes} min on growth ({week.growth_percent()}%), "
+                "{week.actions_done} project step(s) done."
+            }
+            div { class: "rating",
+                span { class: "muted", "Not at all" }
+                for r in 1u8..=5 {
+                    button {
+                        class: "quiet",
+                        onclick: {
+                            let engine = engine.clone();
+                            let week = week.week.clone();
+                            move |_| match engine.rate_week(&week, r) {
+                                Ok(()) => ui.changed(),
+                                Err(e) => ui.error(e),
+                            }
+                        },
+                        "{r}"
+                    }
+                }
+                span { class: "muted", "Very much" }
             }
         }
     }
