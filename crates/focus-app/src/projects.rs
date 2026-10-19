@@ -159,10 +159,10 @@ fn NoteEditor(slug: String, name: String, status: ProjectStatus) -> Element {
                 },
                 before_dump: move |_| {
                     // Keep unsaved edits: save them before appending.
-                    if draft() != saved() {
-                        if let Err(e) = save_engine.save_note(&save_slug, &draft()) {
-                            ui.error(e);
-                        }
+                    if draft() != saved()
+                        && let Err(e) = save_engine.save_note(&save_slug, &draft())
+                    {
+                        ui.error(e);
                     }
                 },
             }

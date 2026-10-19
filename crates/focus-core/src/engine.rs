@@ -18,6 +18,7 @@ use crate::http::{HttpClient, ReqwestHttp};
 use crate::projects::ProjectStore;
 use crate::source::{RefreshReport, Source, SourceHost};
 use crate::storage::{Db, SqliteKv};
+use crate::takeout;
 use crate::youtube::{self, YouTubeSource};
 
 /// File name of the database inside the data directory.
@@ -101,6 +102,12 @@ impl Engine {
         let report = self.youtube.import_takeout_csv(text);
         self.sync_tasks()?;
         Ok(report)
+    }
+
+    /// Imports subscriptions from a Takeout `.zip` (as downloaded) or an
+    /// extracted `subscriptions.csv`. The file is read locally only.
+    pub fn import_takeout_file(&self, path: &Path) -> Result<ImportReport> {
+        self.import_takeout_csv(&takeout::subscriptions_csv(path)?)
     }
 
     pub async fn import_pasted(&self, text: &str) -> Result<ImportReport> {
