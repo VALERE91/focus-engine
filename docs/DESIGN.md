@@ -115,6 +115,8 @@ The policy turns (slot, mode, history) into a short ranked list of 1 to 3 tasks.
 
 **Budgets.** Daily minutes per category. Video starts at 60 min on work days and 120 on weekends. Each hand-off logs the video's duration as a proxy for watch time. When a budget is spent, that category disappears until the next day.
 
+In the prototype only the video budget exists. A hand-off is charged to the local date on which it happened; marking a video "watched" without opening it charges nothing; undo refunds the original day. When the budget is spent, the feed shows a calm "see you tomorrow" state with the project notes and a small "show the feed anyway" link (nudge, never lock).
+
 **Growth ramp.** A target share of `learning` + `mind-game` + `production` per mode, raised by a few points per week (for example 20%, 25%, 30%), capped by the user.
 
 **Back-off.** If the skip rate on growth tasks over the last 7 days rises above a threshold, the ramp pauses; if it keeps rising, it steps back. In effect a small bandit tuning itself to what the user actually does.
@@ -163,7 +165,7 @@ interface types {
     title: string,
     category: category,
     tags: list<string>,
-    est-minutes: u32,
+    est-minutes: u32,          // 0 = unknown, the host applies its default
     difficulty: option<f32>,
     device: device,
     content: list<block>,
@@ -179,11 +181,16 @@ interface types {
     allowed-hosts: list<string>,
     wants-llm: bool,
   }
+
+  // Redirects are never followed, so a source can tell a 200 from a 3xx
+  // (the YouTube Shorts check depends on it).
+  record http-response { status: u16, location: option<string>, body: list<u8> }
 }
 
 interface host {
+  use types.{http-response};
   // no personal data crosses this boundary
-  http-get: func(url: string) -> result<list<u8>, string>;     // allowlisted hosts only
+  http-get: func(url: string) -> result<http-response, string>;  // allowlisted hosts only
   kv-get: func(key: string) -> option<list<u8>>;
   kv-set: func(key: string, value: list<u8>);
   llm: func(prompt: string, max-tokens: u32) -> result<string, string>;  // user's key, host-side quota
@@ -199,6 +206,8 @@ world extension {
   export refresh: func();      // called on a schedule to prefetch
 }
 ```
+
+A reference copy of this package lives in `extensions/wit/focus-engine.wit`.
 
 **Capabilities and limits**
 
@@ -224,6 +233,15 @@ The first queues are written against the same interface, to prove it before anyo
 - Rewatches: scored from a Google Takeout `watch-history.json` import (the API no longer exposes history). Re-import monthly.
 - Phone variant: for long videos, the host's LLM call writes a 3-minute text summary from the transcript, with a "watch on desktop" button.
 - Content: `link-out` to `youtube.com/watch?v=ID`, opened in the default browser or YouTube app, where Premium applies.
+
+Prototype behavior (native source, no API key):
+
+- "New" means published in the last 14 days. Only those uploads get the Shorts check, which keeps the first import to a few requests per channel.
+- The check reads the response without following redirects: 200 is a Short, a redirect to `/watch` is a regular video, anything else (error, other status, a redirect to the EU consent page) is unknown and retried on the next refresh. Known answers are cached forever.
+- While a video is unchecked, one seen in the UULF playlist is shown (UULF already excludes most Shorts); one only seen in the `UU` fallback playlist is held back until a check succeeds.
+- Each channel is fetched at most once per 15 minutes; the app refreshes on start and every 30 minutes.
+- Durations are unknown without the API, so `est-minutes` is 0 and the host charges its default (15 minutes).
+- The source only uses its key-value store, the HTTP client and a clock. The engine, not the source, records outcomes and hides handled tasks, so undo needs nothing from the source. The native `refresh` also returns a small report (fetched, new, errors) for the status line.
 
 Channel selection: on setup, import every subscription (Takeout `subscriptions.csv`, pasted channel URLs, or later the API with OAuth) and show the full list with checkboxes. Only ticked channels are followed.
 

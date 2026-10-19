@@ -1,0 +1,76 @@
+// Reference copy of the WIT package described in docs/DESIGN.md.
+// Not compiled yet: the prototype runs its sources natively behind the
+// `Source` trait in focus-core, whose types mirror these names.
+package focus:engine@0.1.0;
+
+interface types {
+  enum category { leisure, learning, mind-game, production, chores, rest }
+  enum device { desktop, phone, any }
+  enum verdict { done, skipped, partial, not-interested }
+
+  variant block {
+    text(string),
+    heading(string),
+    link-out(string),          // opens in the default browser or a native app
+    quiz(quiz),
+    timer(u32),                // seconds
+    code-exercise(code-exercise),
+    image(string),             // URL on an allowed domain
+  }
+
+  record quiz { prompt: string, choices: list<string>, answer: option<u32> }
+  record code-exercise { language: string, prompt: string, starter: string }
+
+  record ctx {
+    minutes: u32,
+    device: device,
+    mode: string,
+    skill-ratings: list<tuple<string, f32>>,
+    locale: string,
+  }
+
+  record task {
+    id: string,
+    title: string,
+    category: category,
+    tags: list<string>,
+    est-minutes: u32,          // 0 = unknown, the host applies its default
+    difficulty: option<f32>,
+    device: device,
+    content: list<block>,
+    expires-at: option<u64>,
+  }
+
+  record outcome { task-id: string, verdict: verdict, score: option<f32>, minutes: u32 }
+
+  record manifest {
+    name: string,
+    version: string,
+    categories: list<category>,
+    allowed-hosts: list<string>,
+    wants-llm: bool,
+  }
+
+  // Redirects are never followed, so a source can tell a 200 from a 3xx
+  // (the YouTube Shorts check depends on it).
+  record http-response { status: u16, location: option<string>, body: list<u8> }
+}
+
+interface host {
+  use types.{http-response};
+  // no personal data crosses this boundary
+  http-get: func(url: string) -> result<http-response, string>;  // allowlisted hosts only
+  kv-get: func(key: string) -> option<list<u8>>;
+  kv-set: func(key: string, value: list<u8>);
+  llm: func(prompt: string, max-tokens: u32) -> result<string, string>;  // user's key, host-side quota
+  log: func(msg: string);
+}
+
+world extension {
+  use types.{manifest, ctx, task, outcome};
+  import host;
+  export describe: func() -> manifest;
+  export candidates: func(ctx: ctx) -> list<task>;
+  export on-outcome: func(o: outcome);
+  export refresh: func();      // called on a schedule to prefetch
+}

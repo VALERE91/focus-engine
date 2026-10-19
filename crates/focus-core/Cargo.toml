@@ -1,0 +1,27 @@
+[package]
+name = "focus-core"
+description = "The Focus Engine: storage, sources, budget and projects."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+focus-types.workspace = true
+async-trait.workspace = true
+csv.workspace = true
+directories.workspace = true
+futures.workspace = true
+jiff.workspace = true
+open.workspace = true
+quick-xml.workspace = true
+reqwest.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio.workspace = true

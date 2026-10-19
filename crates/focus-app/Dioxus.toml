@@ -1,0 +1,7 @@
+[application]
+name = "focus-engine"
+default_platform = "desktop"
+
+[bundle]
+identifier = "dev.focus-engine.app"
+publisher = "Focus Engine"
