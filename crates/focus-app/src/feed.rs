@@ -116,7 +116,11 @@ fn SpentView(on_show_anyway: EventHandler<()>) -> Element {
 fn Card(task: Task) -> Element {
     let engine = use_context::<Engine>();
     let ui = use_context::<Ui>();
-    let meta = task.texts().collect::<Vec<_>>().join(" · ");
+    let mut meta: Vec<String> = task.texts().map(str::to_owned).collect();
+    if task.est_minutes > 0 {
+        meta.push(format_minutes(task.est_minutes));
+    }
+    let meta = meta.join(" · ");
 
     let act = |kind: Action| {
         let engine = engine.clone();
@@ -167,6 +171,15 @@ fn Card(task: Task) -> Element {
                 }
             }
         }
+    }
+}
+
+/// "13 min", "1 h 05 min".
+fn format_minutes(m: u32) -> String {
+    if m < 60 {
+        format!("{m} min")
+    } else {
+        format!("{} h {:02} min", m / 60, m % 60)
     }
 }
 

@@ -31,7 +31,7 @@ If you already have a large export, choose its parts one by one: the app reads o
 
 ## Using it
 
-- **Feed:** new uploads from the last 14 days, newest first. Click a video to open it in your browser, where YouTube Premium applies. Opening counts as watched and charges its length (15 minutes when unknown) to today's budget; **Undo** reverses it. **Watched** and **Not interested** hide a video without charging.
+- **Feed:** new uploads from the last 14 days, newest first. Click a video to open it in your browser, where YouTube Premium applies. Opening counts as watched and charges its length to today's budget (read once from the video's public page; 15 minutes if it can't be found); **Undo** reverses it. **Watched** and **Not interested** hide a video without charging.
 - **Budget:** 60 minutes on weekdays and 120 on weekends by default, changeable in **Settings**. When it is spent, the feed shows your project notes instead.
 - **Projects:** each project has a status and one Markdown note, stored as `projects/<name>.md` in the data folder shown in **Settings**, so any editor can open it. The dump box appends a timestamped line.
 

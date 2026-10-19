@@ -22,6 +22,10 @@ pub fn feed_url(playlist: &str) -> String {
     format!("https://www.youtube.com/feeds/videos.xml?playlist_id={playlist}")
 }
 
+pub fn watch_url(id: &str) -> String {
+    format!("https://www.youtube.com/watch?v={id}")
+}
+
 pub fn shorts_url(id: &str) -> String {
     format!("https://www.youtube.com/shorts/{id}")
 }

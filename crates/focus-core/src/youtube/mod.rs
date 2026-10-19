@@ -10,7 +10,7 @@
 //! | --- | --- |
 //! | `channel:<channel id>` | JSON [`StoredChannel`] |
 //! | `followed:<channel id>` | `1`; absent when not followed |
-//! | `video:<channel id>:<video id>` | JSON [`StoredVideo`] |
+//! | `video:<channel id>:<video id>` | JSON [`StoredVideo`], with its length once known |
 //! | `shorts:<video id>` | `short` or `regular`, cached forever |
 //! | `fetched:<channel id>` | unix seconds of the last fetch attempt |
 //! | `layout` | `2`: version of this layout (1 kept whole lists) |
@@ -18,6 +18,7 @@
 pub mod feed;
 pub mod ids;
 pub mod import;
+pub mod watch;
 
 use std::collections::HashSet;
 
@@ -41,6 +42,8 @@ pub const MIN_FETCH_INTERVAL: SignedDuration = SignedDuration::from_mins(15);
 pub const MAX_AGE: SignedDuration = SignedDuration::from_hours(14 * 24);
 /// Videos kept per channel in the store.
 pub const KEEP_PER_CHANNEL: usize = 50;
+/// Watch page fetches per video before its duration stays unknown.
+pub const MAX_DURATION_ATTEMPTS: u8 = 3;
 /// Current key layout, stored under `layout`.
 const LAYOUT: &[u8] = b"2";
 
@@ -73,8 +76,12 @@ pub struct StoredVideo {
     /// Unix seconds; falls back to `first_seen` when the feed has none.
     pub published: Option<i64>,
     pub thumbnail: Option<String>,
-    /// Unknown without an API key; kept for when one is configured.
+    /// Read from the watch page once the video passes the Shorts check.
     pub duration_secs: Option<u32>,
+    /// Watch page fetches tried so far; stops at [`MAX_DURATION_ATTEMPTS`]
+    /// so a change in YouTube's markup cannot cause endless refetching.
+    #[serde(default)]
+    pub duration_attempts: u8,
     /// Seen in the long-form (UULF) playlist at least once.
     pub in_uulf: bool,
     pub first_seen: i64,
@@ -393,6 +400,7 @@ impl YouTubeSource {
                         published: entry.published.map(|t| t.as_second()),
                         thumbnail: entry.thumbnail,
                         duration_secs: None,
+                        duration_attempts: 0,
                         in_uulf,
                         first_seen: now.as_second(),
                     };
@@ -408,19 +416,41 @@ impl YouTubeSource {
             self.host.kv.delete(&format!("{prefix}{}", old.id));
         }
 
+        // Recent videos only: the Shorts check, then (for those the feed
+        // may show) the length, each fetched once and cached.
         let cutoff = now.as_second() - MAX_AGE.as_secs();
-        for v in videos.iter().filter(|v| v.published_or_seen() >= cutoff) {
-            let key = format!("shorts:{}", v.id);
-            if self.host.kv.get(&key).is_some() {
-                continue;
+        let mut updated = Vec::new();
+        for v in videos
+            .iter_mut()
+            .filter(|v| v.published_or_seen() >= cutoff)
+        {
+            let mut check = self.shorts_check(&v.id);
+            if check == ShortsCheck::Unknown {
+                check =
+                    ShortsCheck::from_response(&self.host.http.get(&ids::shorts_url(&v.id)).await);
+                if let Some(value) = check.cache_value() {
+                    self.host.kv.set(&format!("shorts:{}", v.id), value);
+                }
             }
-            let check =
-                ShortsCheck::from_response(&self.host.http.get(&ids::shorts_url(&v.id)).await);
-            if let Some(value) = check.cache_value() {
-                self.host.kv.set(&key, value);
+            if keep_video(v.in_uulf, check)
+                && v.duration_secs.is_none()
+                && v.duration_attempts < MAX_DURATION_ATTEMPTS
+            {
+                v.duration_attempts += 1;
+                v.duration_secs = self.fetch_duration(&v.id).await;
+                updated.extend(json_entry(format!("{prefix}{}", v.id), v));
             }
         }
+        self.host.kv.set_many(&updated);
         out
+    }
+
+    async fn fetch_duration(&self, video_id: &str) -> Option<u32> {
+        let resp = self.host.http.get(&ids::watch_url(video_id)).await.ok()?;
+        if !resp.is_success() {
+            return None;
+        }
+        watch::duration_in_page(&String::from_utf8_lossy(&resp.body))
     }
 
     /// The long-form playlist feed, else the full uploads feed. The flag
