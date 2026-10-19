@@ -62,7 +62,7 @@ input, textarea, select {
   border-radius: 8px;
   padding: 6px 10px;
 }
-textarea { width: 100%; resize: vertical; }
+textarea { width: 100%; resize: vertical; margin-bottom: 8px; }
 
 .muted { color: var(--muted); }
 .error { color: var(--danger); }
@@ -182,9 +182,14 @@ footer.status {
   padding: 16px;
   margin-bottom: 16px;
 }
-.import-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 24px; }
-.import-grid button { margin-top: 8px; }
 .notice { background: var(--accent-soft); border-radius: 8px; padding: 8px 12px; }
+.notice.warn { background: transparent; border: 1px solid var(--danger); color: var(--text); }
+.guide { margin: 8px 0 16px; }
+.guide summary { cursor: pointer; font-weight: 600; }
+.steps { padding-left: 22px; margin: 10px 0 0; }
+.steps li { margin: 8px 0; }
+.steps em { color: var(--danger); font-style: normal; }
+.file-pick { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 .picker-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
 .picker-tools { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
 .picker-tools input { flex: 1; min-width: 160px; }

@@ -9,6 +9,7 @@ pub mod http;
 pub mod projects;
 pub mod source;
 pub mod storage;
+pub mod takeout;
 pub mod youtube;
 
 pub use engine::{DB_FILE, Engine, EngineDeps, MIN_REFRESH_INTERVAL_MINUTES};

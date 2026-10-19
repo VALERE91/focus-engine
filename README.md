@@ -15,12 +15,16 @@ The current prototype is a desktop app that replaces opening YouTube: a feed of 
 
 ## Import your YouTube subscriptions
 
-1. Go to [takeout.google.com](https://takeout.google.com), click **Deselect all**, then tick only **YouTube and YouTube Music**.
-2. Under **All YouTube data included**, keep only **subscriptions**, then export and download the archive.
-3. Unzip it and find `subscriptions.csv` (under `Takeout/YouTube and YouTube Music/subscriptions/`).
-4. In the app, open **Channels**, choose that file, tick the channels worth your time, and click **Done, show my feed**.
+Focus Engine never connects to your Google account. Instead, you download your subscriptions list from Google Takeout and the app reads that file on your computer. The **Channels** screen walks you through it:
 
-You can also paste channel links (`https://www.youtube.com/@name`, `/channel/UC…` URLs or bare channel IDs) into the box next to it; pasted channels are followed right away.
+1. Click **Open Google Takeout**; it opens in your browser with YouTube preselected.
+2. Check that only **YouTube and YouTube Music** is ticked (otherwise **Deselect all**, then tick it again).
+3. Click **All YouTube data included**, then **Deselect all**, tick only **subscriptions**, and click **OK**. Skip this and Google also exports all your videos, which can be tens of gigabytes split across many files.
+4. Click **Next step**, keep **Export once** and the **.zip** file type, and click **Create export**.
+5. Download the file from Google's email. It should be a few KB.
+6. Choose that `.zip` in the app; no need to unzip it. Then tick the channels worth your time and click **Done, show my feed**.
+
+If you already have a large export, choose its parts one by one: the app reads only the small list inside each archive and tells you if a part does not contain it. You can also paste channel links (`https://www.youtube.com/@name`, `/channel/UC…` URLs or bare channel IDs); pasted channels are followed right away.
 
 ## Using it
 
@@ -39,3 +43,7 @@ cargo test --workspace
 ```
 
 `crates/focus-core` holds all logic and is tested without network access; `crates/focus-app` is a thin Dioxus shell; `crates/focus-types` holds the shared types. The design lives in [`docs/DESIGN.md`](docs/DESIGN.md).
+
+## License
+
+Dual-licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option. Unless you state otherwise, any contribution you submit is dual-licensed the same way, without additional terms.

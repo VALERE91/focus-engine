@@ -22,6 +22,22 @@ pub enum Error {
     Open { url: String, reason: String },
     #[error("HTTP client could not start: {0}")]
     HttpClient(String),
+    #[error(
+        "This archive has no subscriptions list ({size_mb} MB). If Google split your export \
+         into several files, try the others. Otherwise export again with only “subscriptions” \
+         selected: that export is a few KB."
+    )]
+    TakeoutWithoutSubscriptions { size_mb: u64 },
+    #[error(
+        "This is a .tgz archive. Export again choosing the .zip file type, or extract it and \
+         pick subscriptions.csv."
+    )]
+    TakeoutTgz,
+    #[error(
+        "This file is not a Google Takeout export: pick the .zip Google sent you, or the \
+         subscriptions.csv inside it."
+    )]
+    NotATakeoutFile,
     #[error("project name is empty")]
     EmptyName,
 }

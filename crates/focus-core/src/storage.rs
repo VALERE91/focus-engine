@@ -9,7 +9,10 @@ use rusqlite::{Connection, OptionalExtension, params};
 use crate::error::{Error, Result};
 
 /// Embedded migrations; entry `i` brings the schema to version `i + 1`.
-const MIGRATIONS: &[&str] = &[include_str!("../migrations/001_init.sql")];
+const MIGRATIONS: &[&str] = &[
+    include_str!("../migrations/001_init.sql"),
+    include_str!("../migrations/002_tasks_and_outcome_log.sql"),
+];
 
 /// A shared handle to the engine's SQLite database.
 #[derive(Clone)]
@@ -155,6 +158,33 @@ mod tests {
             .pragma_query_value(None, "journal_mode", |r| r.get(0))
             .unwrap();
         assert_eq!(mode, "wal");
+    }
+
+    #[test]
+    fn version_1_outcomes_are_carried_into_the_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("focus.sqlite");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(MIGRATIONS[0]).unwrap();
+            conn.pragma_update(None, "user_version", 1).unwrap();
+            conn.execute(
+                "INSERT INTO outcomes VALUES ('youtube:a', 'youtube', 'done', 15, 100, '2026-10-16')",
+                [],
+            )
+            .unwrap();
+        }
+        let db = Db::open(&path).unwrap();
+        assert_eq!(db.schema_version().unwrap(), MIGRATIONS.len() as i64);
+        let row: (String, i64, Option<i64>) = db
+            .conn()
+            .query_row(
+                "SELECT task_id, minutes, undone_at FROM outcomes",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(row, ("youtube:a".into(), 15, None));
     }
 
     #[test]

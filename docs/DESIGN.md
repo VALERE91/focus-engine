@@ -100,6 +100,8 @@ Everything reduces to six entities: events open slots, extensions fill queues wi
 
 **Storage:** SQLite (WAL mode), one file, easy to back up. Content blocks stored as JSON. Notes are plain Markdown files next to it.
 
+Current tables: `tasks` is the engine's cache of each source's candidates (the full task as JSON, plus source order and `expires_at`), rewritten after every refresh or change of followed channels, so the feed is one query and a task leaves on time without a refresh. `outcomes` is an append-only log; undo sets `undone_at` instead of deleting, so history is kept for skip rates and rewatch scoring. `source_kv` holds each source's private key-value data (the WIT `kv-get`/`kv-set`), and `projects` and `settings` the rest.
+
 ## Policy engine
 
 The policy turns (slot, mode, history) into a short ranked list of 1 to 3 tasks. It is data, not code: a rules table per mode that the user edits.
@@ -241,9 +243,9 @@ Prototype behavior (native source, no API key):
 - While a video is unchecked, one seen in the UULF playlist is shown (UULF already excludes most Shorts); one only seen in the `UU` fallback playlist is held back until a check succeeds.
 - Each channel is fetched at most once per 15 minutes; the app refreshes on start and every 30 minutes.
 - Durations are unknown without the API, so `est-minutes` is 0 and the host charges its default (15 minutes).
-- The source only uses its key-value store, the HTTP client and a clock. The engine, not the source, records outcomes and hides handled tasks, so undo needs nothing from the source. The native `refresh` also returns a small report (fetched, new, errors) for the status line.
+- The source only uses its key-value store, the HTTP client and a clock. Each video's task expires 14 days after upload. The engine, not the source, caches tasks, records outcomes and hides handled tasks, so undo needs nothing from the source. The native `refresh` also returns a small report (fetched, new, errors) for the status line.
 
-Channel selection: on setup, import every subscription (Takeout `subscriptions.csv`, pasted channel URLs, or later the API with OAuth) and show the full list with checkboxes. Only ticked channels are followed.
+Channel selection: on setup, import every subscription (the Takeout `.zip` as downloaded or its `subscriptions.csv`, or pasted channel URLs) and show the full list with checkboxes. Only ticked channels are followed. The app guides the user through a subscriptions-only Takeout export (a few KB; the default includes uploaded videos and can weigh gigabytes). Importing through the YouTube API with OAuth was considered and rejected: signing in to Google conflicts with the privacy principle, and the sensitive scope would need Google's app verification.
 
 **reading (learning)**
 
