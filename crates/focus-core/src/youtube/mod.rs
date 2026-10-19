@@ -3,21 +3,23 @@
 //!
 //! It only touches what a `.wasm` extension would get from the host (its
 //! key-value store, an HTTP client and a clock), so it can move out of the
-//! engine unchanged. Key layout:
+//! engine unchanged. One key per item, so no change rewrites a whole list
+//! and concurrent calls never overwrite each other:
 //!
 //! | key | value |
 //! | --- | --- |
-//! | `channels` | JSON list of [`Channel`] |
-//! | `videos:<channel id>` | JSON list of [`StoredVideo`], newest first |
+//! | `channel:<channel id>` | JSON [`StoredChannel`] |
+//! | `followed:<channel id>` | `1`; absent when not followed |
+//! | `video:<channel id>:<video id>` | JSON [`StoredVideo`] |
 //! | `shorts:<video id>` | `short` or `regular`, cached forever |
 //! | `fetched:<channel id>` | unix seconds of the last fetch attempt |
+//! | `layout` | `2`: version of this layout (1 kept whole lists) |
 
 pub mod feed;
 pub mod ids;
 pub mod import;
 
 use std::collections::HashSet;
-use std::sync::Mutex;
 
 use async_trait::async_trait;
 use focus_types::{Block, Category, Channel, Ctx, Device, ImportReport, Manifest, Outcome, Task};
@@ -38,7 +40,28 @@ pub const MIN_FETCH_INTERVAL: SignedDuration = SignedDuration::from_mins(15);
 /// Only uploads this recent are "new" (and get a Shorts check).
 pub const MAX_AGE: SignedDuration = SignedDuration::from_hours(14 * 24);
 /// Videos kept per channel in the store.
-const KEEP_PER_CHANNEL: usize = 50;
+pub const KEEP_PER_CHANNEL: usize = 50;
+/// Current key layout, stored under `layout`.
+const LAYOUT: &[u8] = b"2";
+
+fn channel_key(id: &str) -> String {
+    format!("channel:{id}")
+}
+
+fn followed_key(id: &str) -> String {
+    format!("followed:{id}")
+}
+
+fn video_prefix(channel_id: &str) -> String {
+    format!("video:{channel_id}:")
+}
+
+/// What the source keeps per channel; follow state is a separate key.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StoredChannel {
+    /// May be empty until the first feed fetch fills it in.
+    pub title: String,
+}
 /// Channels fetched in parallel.
 const CONCURRENCY: usize = 4;
 
@@ -118,15 +141,50 @@ pub fn keep_video(in_uulf: bool, check: ShortsCheck) -> bool {
 
 pub struct YouTubeSource {
     host: SourceHost,
-    /// Serializes read-modify-write of the `channels` key.
-    channels_lock: Mutex<()>,
 }
 
 impl YouTubeSource {
     pub fn new(host: SourceHost) -> Self {
-        YouTubeSource {
-            host,
-            channels_lock: Mutex::new(()),
+        let source = YouTubeSource { host };
+        source.upgrade_layout();
+        source
+    }
+
+    /// Converts layout 1 (whole lists under `channels` and
+    /// `videos:<channel id>`) to one key per item. The new keys and the
+    /// `layout` marker are written in one transaction; the old keys are
+    /// removed only once that commit is visible.
+    fn upgrade_layout(&self) {
+        if self.host.kv.get("layout").as_deref() == Some(LAYOUT) {
+            return;
+        }
+        let old: Vec<Channel> = self.load_json("channels").unwrap_or_default();
+        let mut entries = Vec::new();
+        for c in &old {
+            entries.extend(json_entry(
+                channel_key(&c.id),
+                &StoredChannel {
+                    title: c.title.clone(),
+                },
+            ));
+            if c.followed {
+                entries.push((followed_key(&c.id), b"1".to_vec()));
+            }
+            let videos: Vec<StoredVideo> = self
+                .load_json(&format!("videos:{}", c.id))
+                .unwrap_or_default();
+            for v in &videos {
+                entries.extend(json_entry(format!("{}{}", video_prefix(&c.id), v.id), v));
+            }
+        }
+        entries.push(("layout".into(), LAYOUT.to_vec()));
+        self.host.kv.set_many(&entries);
+        if self.host.kv.get("layout").as_deref() != Some(LAYOUT) {
+            return; // the write failed; try again next start
+        }
+        self.host.kv.delete("channels");
+        for c in &old {
+            self.host.kv.delete(&format!("videos:{}", c.id));
         }
     }
 
@@ -140,56 +198,87 @@ impl YouTubeSource {
     }
 
     fn load_channels(&self) -> Vec<Channel> {
-        self.load_json("channels").unwrap_or_default()
-    }
-
-    fn update_channels<R>(&self, f: impl FnOnce(&mut Vec<Channel>) -> R) -> R {
-        let _guard = self.channels_lock.lock().unwrap_or_else(|e| e.into_inner());
-        let mut channels = self.load_channels();
-        let result = f(&mut channels);
-        self.store_json("channels", &channels);
-        result
+        let followed: HashSet<String> = self
+            .host
+            .kv
+            .list_keys("followed:")
+            .into_iter()
+            .filter_map(|k| k.strip_prefix("followed:").map(str::to_owned))
+            .collect();
+        self.host
+            .kv
+            .list_keys("channel:")
+            .into_iter()
+            .filter_map(|key| {
+                let id = key.strip_prefix("channel:")?.to_owned();
+                let stored: StoredChannel = self.load_json(&key).unwrap_or_default();
+                Some(Channel {
+                    followed: followed.contains(&id),
+                    id,
+                    title: stored.title,
+                })
+            })
+            .collect()
     }
 
     pub fn set_followed(&self, channel_id: &str, followed: bool) {
-        self.update_channels(|channels| {
-            if let Some(c) = channels.iter_mut().find(|c| c.id == channel_id) {
-                c.followed = followed;
-            }
-        });
+        if self.host.kv.get(&channel_key(channel_id)).is_none() {
+            return;
+        }
+        if followed {
+            self.host.kv.set(&followed_key(channel_id), b"1");
+        } else {
+            self.host.kv.delete(&followed_key(channel_id));
+        }
     }
 
     pub fn set_all_followed(&self, followed: bool) {
-        self.update_channels(|channels| {
-            for c in channels {
-                c.followed = followed;
+        let ids = self.load_channels().into_iter().map(|c| c.id);
+        if followed {
+            let entries: Vec<_> = ids.map(|id| (followed_key(&id), b"1".to_vec())).collect();
+            self.host.kv.set_many(&entries);
+        } else {
+            for id in ids {
+                self.host.kv.delete(&followed_key(&id));
             }
-        });
+        }
     }
 
     /// Adds channels; known ones keep their state, except that `follow`
     /// ticks them (an explicit paste means "follow this").
     fn add_channels(&self, found: Vec<ImportedChannel>, follow: bool) -> ImportReport {
-        self.update_channels(|channels| {
-            let mut report = ImportReport::default();
-            for imported in found {
-                if let Some(c) = channels.iter_mut().find(|c| c.id == imported.id) {
-                    report.already_known += 1;
-                    if c.title.is_empty() {
-                        c.title = imported.title;
-                    }
-                    c.followed |= follow;
-                } else {
-                    report.added += 1;
-                    channels.push(Channel {
-                        id: imported.id,
-                        title: imported.title,
-                        followed: follow,
-                    });
-                }
+        let mut report = ImportReport::default();
+        let mut entries = Vec::new();
+        let mut seen = HashSet::new();
+        for imported in found {
+            if !seen.insert(imported.id.clone()) {
+                continue;
             }
-            report
-        })
+            let key = channel_key(&imported.id);
+            let fill_title = match self.load_json::<StoredChannel>(&key) {
+                Some(existing) => {
+                    report.already_known += 1;
+                    existing.title.is_empty() && !imported.title.is_empty()
+                }
+                None => {
+                    report.added += 1;
+                    true
+                }
+            };
+            if fill_title {
+                entries.extend(json_entry(
+                    key,
+                    &StoredChannel {
+                        title: imported.title,
+                    },
+                ));
+            }
+            if follow {
+                entries.push((followed_key(&imported.id), b"1".to_vec()));
+            }
+        }
+        self.host.kv.set_many(&entries);
+        report
     }
 
     /// Imports a Takeout `subscriptions.csv`. New channels start unticked:
@@ -255,13 +344,13 @@ impl YouTubeSource {
 
     // ----- refresh -------------------------------------------------------
 
-    async fn refresh_channel(&self, channel: &Channel, now: Timestamp) -> ChannelRefresh {
-        let mut out = ChannelRefresh::default();
+    async fn refresh_channel(&self, channel: &Channel, now: Timestamp) -> RefreshReport {
+        let mut out = RefreshReport::default();
         let fetched_key = format!("fetched:{}", channel.id);
         if let Some(last) = self.load_json::<i64>(&fetched_key)
             && now.as_second() - last < MIN_FETCH_INTERVAL.as_secs()
         {
-            out.report.skipped_recent = 1;
+            out.skipped_recent = 1;
             return out;
         }
         self.store_json(&fetched_key, &now.as_second());
@@ -274,36 +363,50 @@ impl YouTubeSource {
                 } else {
                     &channel.title
                 };
-                out.report.errors.push(format!("{name}: {e}"));
+                out.errors.push(format!("{name}: {e}"));
                 return out;
             }
         };
-        out.report.fetched = 1;
-        out.channel_title = feed.channel_title.clone();
-
-        let videos_key = format!("videos:{}", channel.id);
-        let mut videos: Vec<StoredVideo> = self.load_json(&videos_key).unwrap_or_default();
-        for entry in feed.entries {
-            if let Some(v) = videos.iter_mut().find(|v| v.id == entry.video_id) {
-                v.title = entry.title;
-                v.thumbnail = entry.thumbnail.or(v.thumbnail.take());
-                v.in_uulf |= in_uulf;
-            } else {
-                out.report.new_items += 1;
-                videos.push(StoredVideo {
-                    id: entry.video_id,
-                    title: entry.title,
-                    published: entry.published.map(|t| t.as_second()),
-                    thumbnail: entry.thumbnail,
-                    duration_secs: None,
-                    in_uulf,
-                    first_seen: now.as_second(),
-                });
-            }
+        out.fetched = 1;
+        if let Some(title) = feed.channel_title
+            && title != channel.title
+        {
+            self.store_json(&channel_key(&channel.id), &StoredChannel { title });
         }
+
+        let prefix = video_prefix(&channel.id);
+        let mut videos = self.load_videos(&channel.id);
+        let mut entries = Vec::new();
+        for entry in feed.entries {
+            let video = match videos.iter_mut().find(|v| v.id == entry.video_id) {
+                Some(v) => {
+                    v.title = entry.title;
+                    v.thumbnail = entry.thumbnail.or(v.thumbnail.take());
+                    v.in_uulf |= in_uulf;
+                    v.clone()
+                }
+                None => {
+                    out.new_items += 1;
+                    let v = StoredVideo {
+                        id: entry.video_id,
+                        title: entry.title,
+                        published: entry.published.map(|t| t.as_second()),
+                        thumbnail: entry.thumbnail,
+                        duration_secs: None,
+                        in_uulf,
+                        first_seen: now.as_second(),
+                    };
+                    videos.push(v.clone());
+                    v
+                }
+            };
+            entries.extend(json_entry(format!("{prefix}{}", video.id), &video));
+        }
+        self.host.kv.set_many(&entries);
         videos.sort_by_key(|v| std::cmp::Reverse(v.published_or_seen()));
-        videos.truncate(KEEP_PER_CHANNEL);
-        self.store_json(&videos_key, &videos);
+        for old in videos.split_off(KEEP_PER_CHANNEL.min(videos.len())) {
+            self.host.kv.delete(&format!("{prefix}{}", old.id));
+        }
 
         let cutoff = now.as_second() - MAX_AGE.as_secs();
         for v in videos.iter().filter(|v| v.published_or_seen() >= cutoff) {
@@ -345,6 +448,15 @@ impl YouTubeSource {
 
     // ----- helpers -------------------------------------------------------
 
+    fn load_videos(&self, channel_id: &str) -> Vec<StoredVideo> {
+        self.host
+            .kv
+            .list_keys(&video_prefix(channel_id))
+            .iter()
+            .filter_map(|key| self.load_json(key))
+            .collect()
+    }
+
     fn load_json<T: for<'de> Deserialize<'de>>(&self, key: &str) -> Option<T> {
         serde_json::from_slice(&self.host.kv.get(key)?).ok()
     }
@@ -361,12 +473,6 @@ impl YouTubeSource {
             .get(&format!("shorts:{video_id}"))
             .map_or(ShortsCheck::Unknown, |v| ShortsCheck::from_cache(&v))
     }
-}
-
-#[derive(Default)]
-struct ChannelRefresh {
-    report: RefreshReport,
-    channel_title: Option<String>,
 }
 
 #[async_trait]
@@ -388,31 +494,14 @@ impl Source for YouTubeSource {
             .into_iter()
             .filter(|c| c.followed)
             .collect();
-        let results: Vec<(String, ChannelRefresh)> = futures::stream::iter(followed)
-            .map(|c| async move {
-                let r = self.refresh_channel(&c, now).await;
-                (c.id, r)
-            })
+        let results: Vec<RefreshReport> = futures::stream::iter(followed)
+            .map(|c| async move { self.refresh_channel(&c, now).await })
             .buffer_unordered(CONCURRENCY)
             .collect()
             .await;
-
         let mut report = RefreshReport::default();
-        let mut titles = Vec::new();
-        for (id, r) in results {
-            report.merge(r.report);
-            if let Some(t) = r.channel_title {
-                titles.push((id, t));
-            }
-        }
-        if !titles.is_empty() {
-            self.update_channels(|channels| {
-                for (id, title) in titles {
-                    if let Some(c) = channels.iter_mut().find(|c| c.id == id) {
-                        c.title = title;
-                    }
-                }
-            });
+        for r in results {
+            report.merge(r);
         }
         report
     }
@@ -424,10 +513,7 @@ impl Source for YouTubeSource {
         let mut seen = HashSet::new();
         let mut found: Vec<(i64, Task)> = Vec::new();
         for channel in self.load_channels().into_iter().filter(|c| c.followed) {
-            let videos: Vec<StoredVideo> = self
-                .load_json(&format!("videos:{}", channel.id))
-                .unwrap_or_default();
-            for v in videos {
+            for v in self.load_videos(&channel.id) {
                 let at = v.published_or_seen();
                 if at < cutoff
                     || !keep_video(v.in_uulf, self.shorts_check(&v.id))
@@ -471,6 +557,11 @@ impl Source for YouTubeSource {
         // The engine records outcomes and hides handled videos itself, so an
         // undo needs no cooperation from the source. Nothing to learn yet.
     }
+}
+
+/// A `(key, JSON)` pair for `set_many`; `None` only if serialization fails.
+fn json_entry<T: Serialize>(key: String, value: &T) -> Option<(String, Vec<u8>)> {
+    serde_json::to_vec(value).ok().map(|bytes| (key, bytes))
 }
 
 /// `<meta property="NAME" content="…">` from an HTML page.

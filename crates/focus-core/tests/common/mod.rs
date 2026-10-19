@@ -124,10 +124,16 @@ impl UrlOpener for RecordingOpener {
 }
 
 pub fn host(http: Arc<MockHttp>, clock: Arc<TestClock>) -> SourceHost {
-    let db = Db::open_in_memory().unwrap();
-    SourceHost {
-        kv: Arc::new(SqliteKv::new(db, "youtube")),
+    host_with_kv(http, clock).0
+}
+
+/// A host plus a handle on its key-value store, to inspect or seed keys.
+pub fn host_with_kv(http: Arc<MockHttp>, clock: Arc<TestClock>) -> (SourceHost, Arc<SqliteKv>) {
+    let kv = Arc::new(SqliteKv::new(Db::open_in_memory().unwrap(), "youtube"));
+    let host = SourceHost {
+        kv: kv.clone(),
         http,
         clock,
-    }
+    };
+    (host, kv)
 }

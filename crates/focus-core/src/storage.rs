@@ -24,6 +24,9 @@ impl Db {
     pub fn open(path: &Path) -> Result<Self> {
         let conn = Connection::open(path)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
+        // The usual pairing with WAL: still crash-safe, and commits no longer
+        // wait on fsync (a power cut can lose only the last commits).
+        conn.pragma_update(None, "synchronous", "NORMAL")?;
         Self::init(conn)
     }
 
@@ -86,10 +89,17 @@ fn migrate(conn: &mut Connection) -> Result<()> {
     Ok(())
 }
 
-/// The key-value store a source gets from the host (WIT `kv-get` / `kv-set`).
+/// The key-value store a source gets from the host (WIT `kv-*` functions).
+/// Names follow `wasi:keyvalue` where they overlap; listing takes a prefix.
 pub trait KvStore: Send + Sync {
     fn get(&self, key: &str) -> Option<Vec<u8>>;
     fn set(&self, key: &str, value: &[u8]);
+    /// Removing a missing key is not an error.
+    fn delete(&self, key: &str);
+    /// Every key starting with `prefix`, sorted.
+    fn list_keys(&self, prefix: &str) -> Vec<String>;
+    /// Sets several keys in one transaction: all or nothing.
+    fn set_many(&self, entries: &[(String, Vec<u8>)]);
 }
 
 /// A [`KvStore`] scoped to one source, backed by the `source_kv` table.
@@ -125,13 +135,56 @@ impl KvStore for SqliteKv {
     }
 
     fn set(&self, key: &str, value: &[u8]) {
+        let _ = self
+            .db
+            .conn()
+            .execute(UPSERT_KV, params![self.source, key, value]);
+    }
+
+    fn delete(&self, key: &str) {
         let _ = self.db.conn().execute(
-            "INSERT INTO source_kv (source, key, value) VALUES (?1, ?2, ?3)
-             ON CONFLICT (source, key) DO UPDATE SET value = excluded.value",
-            params![self.source, key, value],
+            "DELETE FROM source_kv WHERE source = ?1 AND key = ?2",
+            params![self.source, key],
         );
     }
+
+    fn list_keys(&self, prefix: &str) -> Vec<String> {
+        // A range on the primary key instead of LIKE, so the index is used and
+        // `%`/`_` in keys need no escaping. Keys compare as UTF-8 bytes, and
+        // U+10FFFF is the largest code point, so every key that starts with
+        // `prefix` sorts below `prefix` + U+10FFFF.
+        let upper = format!("{prefix}\u{10FFFF}");
+        let conn = self.db.conn();
+        let Ok(mut stmt) = conn.prepare(
+            "SELECT key FROM source_kv
+             WHERE source = ?1 AND key >= ?2 AND key < ?3 ORDER BY key",
+        ) else {
+            return Vec::new();
+        };
+        stmt.query_map(params![self.source, prefix, upper], |r| r.get(0))
+            .map(|rows| rows.filter_map(Result::ok).collect())
+            .unwrap_or_default()
+    }
+
+    fn set_many(&self, entries: &[(String, Vec<u8>)]) {
+        let mut conn = self.db.conn();
+        let Ok(tx) = conn.transaction() else {
+            return;
+        };
+        for (key, value) in entries {
+            if tx
+                .execute(UPSERT_KV, params![self.source, key, value])
+                .is_err()
+            {
+                return; // dropping `tx` rolls back
+            }
+        }
+        let _ = tx.commit();
+    }
 }
+
+const UPSERT_KV: &str = "INSERT INTO source_kv (source, key, value) VALUES (?1, ?2, ?3)
+     ON CONFLICT (source, key) DO UPDATE SET value = excluded.value";
 
 #[cfg(test)]
 mod tests {
@@ -197,5 +250,33 @@ mod tests {
         assert_eq!(b.get("key"), None);
         a.set("key", b"two");
         assert_eq!(a.get("key").as_deref(), Some(&b"two"[..]));
+        a.delete("key");
+        a.delete("key");
+        assert_eq!(a.get("key"), None);
+    }
+
+    #[test]
+    fn list_keys_by_prefix() {
+        let db = Db::open_in_memory().unwrap();
+        let kv = SqliteKv::new(db.clone(), "a");
+        let entries: Vec<(String, Vec<u8>)> = [
+            "video:UC1:b",
+            "video:UC1:a",
+            "video:UC10:x",
+            "video:UC2:c",
+            "videos",
+            "50%_off",
+        ]
+        .iter()
+        .map(|k| (k.to_string(), b"v".to_vec()))
+        .collect();
+        kv.set_many(&entries);
+        SqliteKv::new(db, "b").set("video:UC1:z", b"other source");
+
+        assert_eq!(kv.list_keys("video:UC1:"), ["video:UC1:a", "video:UC1:b"]);
+        assert_eq!(kv.list_keys("video:").len(), 4);
+        assert_eq!(kv.list_keys("50%"), ["50%_off"]);
+        assert_eq!(kv.list_keys("nothing"), Vec::<String>::new());
+        assert_eq!(kv.list_keys("").len(), 6);
     }
 }

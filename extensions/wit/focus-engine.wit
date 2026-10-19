@@ -60,8 +60,13 @@ interface host {
   use types.{http-response};
   // no personal data crosses this boundary
   http-get: func(url: string) -> result<http-response, string>;  // allowlisted hosts only
+  // A private store per extension. Names follow wasi:keyvalue where they
+  // overlap; listing takes a prefix so an extension can keep one key per item.
   kv-get: func(key: string) -> option<list<u8>>;
   kv-set: func(key: string, value: list<u8>);
+  kv-delete: func(key: string);
+  kv-list: func(prefix: string) -> list<string>;                    // sorted
+  kv-set-many: func(entries: list<tuple<string, list<u8>>>);       // all or nothing
   llm: func(prompt: string, max-tokens: u32) -> result<string, string>;  // user's key, host-side quota
   log: func(msg: string);
 }
