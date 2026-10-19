@@ -271,6 +271,11 @@ impl Engine {
         Ok(())
     }
 
+    /// Opens a page (help, Google Takeout) in the default browser.
+    pub fn open_link(&self, url: &str) -> Result<()> {
+        self.opener.open(url)
+    }
+
     // ----- budget and settings ------------------------------------------
 
     pub fn budget(&self) -> Result<BudgetStatus> {

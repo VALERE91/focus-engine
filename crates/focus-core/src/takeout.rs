@@ -12,6 +12,9 @@ use std::path::Path;
 use crate::error::{Error, Result};
 use crate::youtube::import::parse_takeout_csv;
 
+/// Google Takeout with only YouTube preselected.
+pub const TAKEOUT_URL: &str = "https://takeout.google.com/settings/takeout/custom/youtube";
+
 /// CSV entries larger than this are skipped (and refused as a plain file):
 /// a subscriptions list with thousands of channels is well under 1 MiB.
 pub const MAX_CSV_BYTES: u64 = 8 * 1024 * 1024;

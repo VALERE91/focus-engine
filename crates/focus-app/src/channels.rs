@@ -1,4 +1,5 @@
-//! Channel import (Takeout CSV or pasted URLs) and the checkbox picker.
+//! Channel import (guided Takeout export, or pasted URLs) and the
+//! checkbox picker.
 
 use dioxus::prelude::*;
 use focus_core::Engine;
@@ -35,7 +36,8 @@ pub fn ChannelsView() -> Element {
     ui.watch();
     let mut pasted = use_signal(String::new);
     let mut filter = use_signal(String::new);
-    let mut message = use_signal(String::new);
+    // (is_error, text) about the last import.
+    let mut message = use_signal(|| None::<(bool, String)>);
     let mut busy = use_signal(|| false);
     // Uncontrolled input (see projects.rs); a new generation clears it.
     let mut paste_gen = use_signal(|| 0u32);
@@ -55,6 +57,7 @@ pub fn ChannelsView() -> Element {
 
     let csv_engine = engine.clone();
     let paste_engine = engine.clone();
+    let link_engine = engine.clone();
     let all_engine = engine.clone();
     let none_engine = engine.clone();
     let done_engine = engine.clone();
@@ -62,72 +65,139 @@ pub fn ChannelsView() -> Element {
     rsx! {
         section { class: "panel",
             h2 { "Import your subscriptions" }
-            div { class: "import-grid",
-                div {
-                    h3 { "From Google Takeout" }
-                    p { class: "muted",
-                        "At takeout.google.com, export only “YouTube and YouTube Music” → subscriptions. "
-                        "Unzip it and pick "
-                        code { "subscriptions.csv" }
+            p {
+                "Your list of subscriptions comes from a file Google lets you download. "
+                "Focus Engine reads it on this computer only: it never connects to your Google "
+                "account and uploads nothing."
+            }
+            details { class: "guide", open: channels.is_empty(),
+                summary { "How to get the file (about 5 minutes)" }
+                ol { class: "steps",
+                    li {
+                        button {
+                            class: "quiet",
+                            onclick: move |_| {
+                                if let Err(e) = link_engine.open_link(focus_core::takeout::TAKEOUT_URL) {
+                                    ui.error(e);
+                                }
+                            },
+                            "Open Google Takeout"
+                        }
+                        " It opens in your browser, where you are already signed in to Google."
+                    }
+                    li {
+                        "Check that only "
+                        strong { "YouTube and YouTube Music" }
+                        " is ticked. If other products are ticked too, click "
+                        strong { "Deselect all" }
+                        " at the top of the list, then tick YouTube again."
+                    }
+                    li {
+                        "Under YouTube, click "
+                        strong { "All YouTube data included" }
+                        ", then "
+                        strong { "Deselect all" }
+                        ", tick only "
+                        strong { "subscriptions" }
+                        " and click "
+                        strong { "OK" }
+                        ". "
+                        em { "This step matters: otherwise Google also exports all your videos, which can weigh gigabytes." }
+                    }
+                    li {
+                        "Click "
+                        strong { "Next step" }
+                        ". Keep “Export once” and the "
+                        strong { ".zip" }
+                        " file type, then click "
+                        strong { "Create export" }
                         "."
                     }
-                    input {
-                        r#type: "file",
-                        accept: ".csv,text/csv",
-                        onchange: move |evt: FormEvent| {
-                            let engine = csv_engine.clone();
-                            async move {
-                                for file in evt.files() {
-                                    match file.read_string().await {
-                                        Ok(text) => match engine.import_takeout_csv(&text) {
-                                            Ok(report) => message.set(describe_import(&file.name(), &report)),
-                                            Err(e) => ui.error(e),
-                                        },
-                                        Err(e) => message.set(format!("Could not read {}: {e}", file.name())),
-                                    }
-                                }
-                                ui.changed();
-                            }
-                        },
+                    li {
+                        "Google emails you when the export is ready, usually within minutes. Download it: "
+                        "it should be a few KB. If Google offers several files or gigabytes, go back to step 3."
                     }
-                }
-                div {
-                    h3 { "Or paste channel links" }
-                    p { class: "muted", "One per line: channel URLs, @handles or channel IDs. Pasted channels are followed right away." }
-                    for g in [paste_gen()] {
-                        textarea {
-                            key: "{g}",
-                            rows: 4,
-                            placeholder: "https://www.youtube.com/@3blue1brown",
-                            oninput: move |e| pasted.set(e.value()),
-                        }
-                    }
-                    button {
-                        disabled: busy() || pasted().trim().is_empty(),
-                        onclick: move |_| {
-                            let engine = paste_engine.clone();
-                            async move {
-                                busy.set(true);
-                                match engine.import_pasted(&pasted()).await {
-                                    Ok(report) => {
-                                        message.set(describe_import("Pasted", &report));
-                                        if report.unrecognized.is_empty() {
-                                            pasted.set(String::new());
-                                            paste_gen += 1;
-                                        }
-                                    }
-                                    Err(e) => ui.error(e),
-                                }
-                                busy.set(false);
-                                ui.changed();
-                            }
-                        },
-                        if busy() { "Looking up…" } else { "Add channels" }
-                    }
+                    li { "Choose the downloaded file below. No need to unzip it." }
                 }
             }
-            if !message().is_empty() {
-                p { class: "notice", "{message}" }
+            label { class: "file-pick",
+                span { "Takeout file (.zip, or the subscriptions.csv inside it)" }
+                input {
+                    r#type: "file",
+                    accept: ".zip,.csv,application/zip,text/csv",
+                    disabled: busy(),
+                    onchange: move |evt: FormEvent| {
+                        let engine = csv_engine.clone();
+                        async move {
+                            busy.set(true);
+                            for file in evt.files() {
+                                let name = file.name();
+                                message.set(Some((false, format!("Reading {name}…"))));
+                                let path = file.path();
+                                let engine = engine.clone();
+                                // A Takeout zip can be large: read it off the UI thread.
+                                let result = tokio::task::spawn_blocking(move || {
+                                    engine.import_takeout_file(&path)
+                                })
+                                .await;
+                                message.set(Some(match result {
+                                    Ok(Ok(r)) => (
+                                        false,
+                                        format!(
+                                            "{name}: found {} channels ({} new). Tick the ones worth your time below.",
+                                            r.added + r.already_known,
+                                            r.added
+                                        ),
+                                    ),
+                                    Ok(Err(e)) => (true, e.to_string()),
+                                    Err(e) => (true, format!("Could not read {name}: {e}")),
+                                }));
+                            }
+                            busy.set(false);
+                            ui.changed();
+                        }
+                    },
+                }
+            }
+            if let Some((is_error, text)) = message() {
+                p { class: if is_error { "notice warn" } else { "notice" }, "{text}" }
+            }
+        }
+
+        section { class: "panel",
+            h3 { "Or paste channel links" }
+            p { class: "muted",
+                "One per line: channel URLs, @handles or channel IDs. Pasted channels are followed right away."
+            }
+            for g in [paste_gen()] {
+                textarea {
+                    key: "{g}",
+                    rows: 3,
+                    placeholder: "https://www.youtube.com/@3blue1brown",
+                    oninput: move |e| pasted.set(e.value()),
+                }
+            }
+            button {
+                disabled: busy() || pasted().trim().is_empty(),
+                onclick: move |_| {
+                    let engine = paste_engine.clone();
+                    async move {
+                        busy.set(true);
+                        match engine.import_pasted(&pasted()).await {
+                            Ok(report) => {
+                                message.set(Some((false, describe_import("Pasted", &report))));
+                                if report.unrecognized.is_empty() {
+                                    pasted.set(String::new());
+                                    paste_gen += 1;
+                                }
+                            }
+                            Err(e) => ui.error(e),
+                        }
+                        busy.set(false);
+                        ui.changed();
+                    }
+                },
+                if busy() { "Working…" } else { "Add channels" }
             }
         }
 

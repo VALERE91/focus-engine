@@ -245,7 +245,7 @@ Prototype behavior (native source, no API key):
 - Durations are unknown without the API, so `est-minutes` is 0 and the host charges its default (15 minutes).
 - The source only uses its key-value store, the HTTP client and a clock. Each video's task expires 14 days after upload. The engine, not the source, caches tasks, records outcomes and hides handled tasks, so undo needs nothing from the source. The native `refresh` also returns a small report (fetched, new, errors) for the status line.
 
-Channel selection: on setup, import every subscription (Takeout `subscriptions.csv`, pasted channel URLs, or later the API with OAuth) and show the full list with checkboxes. Only ticked channels are followed.
+Channel selection: on setup, import every subscription (the Takeout `.zip` as downloaded or its `subscriptions.csv`, or pasted channel URLs) and show the full list with checkboxes. Only ticked channels are followed. The app guides the user through a subscriptions-only Takeout export (a few KB; the default includes uploaded videos and can weigh gigabytes). Importing through the YouTube API with OAuth was considered and rejected: signing in to Google conflicts with the privacy principle, and the sensitive scope would need Google's app verification.
 
 **reading (learning)**
 
