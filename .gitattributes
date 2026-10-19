@@ -1,0 +1,3 @@
+# Test fixtures are checked byte for byte (the Takeout CSV keeps its BOM and
+# CRLF line endings on purpose), so git must never rewrite them.
+crates/focus-core/tests/fixtures/** -text
