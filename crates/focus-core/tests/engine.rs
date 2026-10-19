@@ -303,3 +303,17 @@ fn project_tasks(e: &Engine) -> Vec<(String, serde_json::Value)> {
         })
         .collect()
 }
+
+#[tokio::test]
+async fn channel_category_reaches_the_cached_tasks() {
+    let f = fixture_at(FRIDAY_EVENING).await;
+    f.engine
+        .set_channel_category(KURZ, focus_types::Category::Learning)
+        .unwrap();
+    let feed = f.engine.feed().unwrap();
+    assert!(
+        feed.items
+            .iter()
+            .all(|t| t.category == focus_types::Category::Learning)
+    );
+}

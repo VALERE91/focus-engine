@@ -10,6 +10,7 @@
 //! | --- | --- |
 //! | `channel:<channel id>` | JSON [`StoredChannel`] |
 //! | `followed:<channel id>` | `1`; absent when not followed |
+//! | `category:<channel id>` | e.g. `learning`; absent means `leisure` |
 //! | `video:<channel id>:<video id>` | JSON [`StoredVideo`], with its length once known |
 //! | `shorts:<video id>` | `short` or `regular`, cached forever |
 //! | `fetched:<channel id>` | unix seconds of the last fetch attempt |
@@ -55,8 +56,21 @@ fn followed_key(id: &str) -> String {
     format!("followed:{id}")
 }
 
+fn category_key(id: &str) -> String {
+    format!("category:{id}")
+}
+
 fn video_prefix(channel_id: &str) -> String {
     format!("video:{channel_id}:")
+}
+
+/// A channel as layout 1 stored it, frozen so later changes to
+/// [`Channel`] cannot break the conversion.
+#[derive(Deserialize)]
+struct LegacyChannel {
+    id: String,
+    title: String,
+    followed: bool,
 }
 
 /// What the source keeps per channel; follow state is a separate key.
@@ -165,7 +179,7 @@ impl YouTubeSource {
         if self.host.kv.get("layout").as_deref() == Some(LAYOUT) {
             return;
         }
-        let old: Vec<Channel> = self.load_json("channels").unwrap_or_default();
+        let old: Vec<LegacyChannel> = self.load_json("channels").unwrap_or_default();
         let mut entries = Vec::new();
         for c in &old {
             entries.extend(json_entry(
@@ -212,6 +226,17 @@ impl YouTubeSource {
             .into_iter()
             .filter_map(|k| k.strip_prefix("followed:").map(str::to_owned))
             .collect();
+        let categories: std::collections::HashMap<String, Category> = self
+            .host
+            .kv
+            .list_keys("category:")
+            .into_iter()
+            .filter_map(|key| {
+                let value = self.host.kv.get(&key)?;
+                let category = Category::parse(std::str::from_utf8(&value).ok()?)?;
+                Some((key.strip_prefix("category:")?.to_owned(), category))
+            })
+            .collect();
         self.host
             .kv
             .list_keys("channel:")
@@ -221,6 +246,7 @@ impl YouTubeSource {
                 let stored: StoredChannel = self.load_json(&key).unwrap_or_default();
                 Some(Channel {
                     followed: followed.contains(&id),
+                    category: categories.get(&id).copied().unwrap_or(Category::Leisure),
                     id,
                     title: stored.title,
                 })
@@ -236,6 +262,20 @@ impl YouTubeSource {
             self.host.kv.set(&followed_key(channel_id), b"1");
         } else {
             self.host.kv.delete(&followed_key(channel_id));
+        }
+    }
+
+    /// Leisure is the default and is stored as the absence of a key.
+    pub fn set_category(&self, channel_id: &str, category: Category) {
+        if self.host.kv.get(&channel_key(channel_id)).is_none() {
+            return;
+        }
+        if category == Category::Leisure {
+            self.host.kv.delete(&category_key(channel_id));
+        } else {
+            self.host
+                .kv
+                .set(&category_key(channel_id), category.as_str().as_bytes());
         }
     }
 
@@ -567,7 +607,7 @@ impl Source for YouTubeSource {
                     Task {
                         id: format!("{TASK_PREFIX}{}", v.id),
                         title: v.title,
-                        category: Category::Leisure,
+                        category: channel.category,
                         tags: vec![NAME.into(), format!("channel:{}", channel.id)],
                         est_minutes: v.duration_secs.map_or(0, |s| s.div_ceil(60)),
                         difficulty: None,

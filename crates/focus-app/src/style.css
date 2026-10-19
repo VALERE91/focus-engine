@@ -252,3 +252,17 @@ footer.status {
 .plan-next .minutes input { width: 90px; }
 .project-name { display: flex; flex-direction: column; min-width: 0; }
 .project-name .next { font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Channel category switch */
+.channel-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.channel-row label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kind {
+  flex: none;
+  font-size: 0.75rem;
+  padding: 1px 8px;
+  color: var(--muted);
+  background: transparent;
+  border-color: var(--line);
+  border-radius: 999px;
+}
+.kind.learning { color: var(--accent); background: var(--accent-soft); border-color: var(--accent-soft); }

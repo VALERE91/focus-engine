@@ -22,6 +22,41 @@ pub enum Category {
     Rest,
 }
 
+impl Category {
+    pub const ALL: [Category; 6] = [
+        Category::Leisure,
+        Category::Learning,
+        Category::MindGame,
+        Category::Production,
+        Category::Chores,
+        Category::Rest,
+    ];
+
+    /// Stable name used in storage, matching the WIT enum case.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Category::Leisure => "leisure",
+            Category::Learning => "learning",
+            Category::MindGame => "mind-game",
+            Category::Production => "production",
+            Category::Chores => "chores",
+            Category::Rest => "rest",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|c| c.as_str() == s)
+    }
+
+    /// The categories the growth share counts.
+    pub fn is_growth(self) -> bool {
+        matches!(
+            self,
+            Category::Learning | Category::MindGame | Category::Production
+        )
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Device {
@@ -172,6 +207,8 @@ pub struct Channel {
     /// May be empty until the first feed fetch fills it in.
     pub title: String,
     pub followed: bool,
+    /// `leisure` (default) or `learning`; its videos take this category.
+    pub category: Category,
 }
 
 /// Result of importing channels from a Takeout CSV or pasted text.
@@ -306,6 +343,15 @@ mod tests {
         ] {
             assert_eq!(Verdict::parse(v.as_str()), Some(v));
         }
+    }
+
+    #[test]
+    fn category_round_trips() {
+        for c in Category::ALL {
+            assert_eq!(Category::parse(c.as_str()), Some(c));
+        }
+        assert!(Category::Production.is_growth());
+        assert!(!Category::Leisure.is_growth());
     }
 
     #[test]

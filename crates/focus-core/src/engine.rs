@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use focus_types::{
-    BudgetStatus, Channel, Ctx, Device, Feed, ImportReport, Outcome, Project, ProjectStatus,
-    Settings, Task, Verdict,
+    BudgetStatus, Category, Channel, Ctx, Device, Feed, ImportReport, Outcome, Project,
+    ProjectStatus, Settings, Task, Verdict,
 };
 use rusqlite::{OptionalExtension, params};
 
@@ -121,6 +121,12 @@ impl Engine {
 
     pub fn set_followed(&self, channel_id: &str, followed: bool) -> Result<()> {
         self.youtube.set_followed(channel_id, followed);
+        self.sync_tasks()
+    }
+
+    /// Videos from a `learning` channel count toward the growth share.
+    pub fn set_channel_category(&self, channel_id: &str, category: Category) -> Result<()> {
+        self.youtube.set_category(channel_id, category);
         self.sync_tasks()
     }
 

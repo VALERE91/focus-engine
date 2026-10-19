@@ -524,3 +524,36 @@ async fn shorts_never_get_a_watch_page_request() {
     src.refresh().await;
     assert!(!http.take_requests().iter().any(|u| u.contains("/watch?v=")));
 }
+
+#[tokio::test]
+async fn learning_channels_give_learning_videos() {
+    let http = MockHttp::new();
+    http.ok(feed_url(UULF), fixture("uulf_feed.xml"));
+    let (host, kv) = host_with_kv(http, TestClock::new());
+    let src = YouTubeSource::new(host);
+    src.import_takeout_csv(&fixture("takeout_subscriptions.csv"));
+    src.set_followed(KURZ, true);
+    src.set_category(KURZ, focus_types::Category::Learning);
+    src.set_category("UCnotachannelweknowabout", focus_types::Category::Learning);
+    assert_eq!(kv.list_keys("category:"), [format!("category:{KURZ}")]);
+
+    // A refresh renames the channel without touching its category.
+    src.refresh().await;
+    let kurz = src.channels().into_iter().find(|c| c.id == KURZ).unwrap();
+    assert_eq!(kurz.title, "Kurzgesagt – In a Nutshell");
+    assert_eq!(kurz.category, focus_types::Category::Learning);
+    assert!(
+        src.candidates(&ctx())
+            .iter()
+            .all(|t| t.category == focus_types::Category::Learning)
+    );
+
+    // Leisure is the default: stored as no key at all.
+    src.set_category(KURZ, focus_types::Category::Leisure);
+    assert!(kv.list_keys("category:").is_empty());
+    assert!(
+        src.candidates(&ctx())
+            .iter()
+            .all(|t| t.category == focus_types::Category::Leisure)
+    );
+}
