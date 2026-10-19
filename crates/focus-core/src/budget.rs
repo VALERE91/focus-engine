@@ -31,10 +31,11 @@ pub fn charge_for(est_minutes: u32, settings: &Settings) -> u32 {
     }
 }
 
-/// Minutes already spent on `day` (only hand-offs count).
+/// Minutes already spent on `day` (only hand-offs count, undone ones not).
 pub fn spent_on(db: &Db, day: &str) -> Result<u32> {
     let total: i64 = db.conn().query_row(
-        "SELECT COALESCE(SUM(minutes), 0) FROM outcomes WHERE day = ?1 AND verdict = ?2",
+        "SELECT COALESCE(SUM(minutes), 0) FROM outcomes
+         WHERE day = ?1 AND verdict = ?2 AND undone_at IS NULL",
         params![day, Verdict::Done.as_str()],
         |r| r.get(0),
     )?;

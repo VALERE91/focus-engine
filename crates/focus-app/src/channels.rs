@@ -79,10 +79,10 @@ pub fn ChannelsView() -> Element {
                             async move {
                                 for file in evt.files() {
                                     match file.read_string().await {
-                                        Ok(text) => {
-                                            let report = engine.import_takeout_csv(&text);
-                                            message.set(describe_import(&file.name(), &report));
-                                        }
+                                        Ok(text) => match engine.import_takeout_csv(&text) {
+                                            Ok(report) => message.set(describe_import(&file.name(), &report)),
+                                            Err(e) => ui.error(e),
+                                        },
                                         Err(e) => message.set(format!("Could not read {}: {e}", file.name())),
                                     }
                                 }
@@ -108,11 +108,15 @@ pub fn ChannelsView() -> Element {
                             let engine = paste_engine.clone();
                             async move {
                                 busy.set(true);
-                                let report = engine.import_pasted(&pasted()).await;
-                                message.set(describe_import("Pasted", &report));
-                                if report.unrecognized.is_empty() {
-                                    pasted.set(String::new());
-                                    paste_gen += 1;
+                                match engine.import_pasted(&pasted()).await {
+                                    Ok(report) => {
+                                        message.set(describe_import("Pasted", &report));
+                                        if report.unrecognized.is_empty() {
+                                            pasted.set(String::new());
+                                            paste_gen += 1;
+                                        }
+                                    }
+                                    Err(e) => ui.error(e),
                                 }
                                 busy.set(false);
                                 ui.changed();
@@ -144,7 +148,9 @@ pub fn ChannelsView() -> Element {
                     button {
                         class: "quiet",
                         onclick: move |_| {
-                            all_engine.set_all_followed(true);
+                            if let Err(e) = all_engine.set_all_followed(true) {
+                                ui.error(e);
+                            }
                             ui.changed();
                         },
                         "Tick all"
@@ -152,7 +158,9 @@ pub fn ChannelsView() -> Element {
                     button {
                         class: "quiet",
                         onclick: move |_| {
-                            none_engine.set_all_followed(false);
+                            if let Err(e) = none_engine.set_all_followed(false) {
+                                ui.error(e);
+                            }
                             ui.changed();
                         },
                         "Untick all"
@@ -197,7 +205,9 @@ fn ChannelRow(id: String, title: String, followed: bool) -> Element {
                     r#type: "checkbox",
                     checked: followed,
                     onchange: move |_| {
-                        engine.set_followed(&id, !followed);
+                        if let Err(e) = engine.set_followed(&id, !followed) {
+                            ui.error(e);
+                        }
                         ui.changed();
                     },
                 }

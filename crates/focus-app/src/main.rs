@@ -80,8 +80,10 @@ pub async fn refresh(engine: Engine, mut ui: Ui) {
     }
     ui.refreshing.set(true);
     ui.status.set("Checking for new videos…".into());
-    let report = engine.refresh().await;
-    ui.status.set(describe_refresh(&report));
+    match engine.refresh().await {
+        Ok(report) => ui.status.set(describe_refresh(&report)),
+        Err(e) => ui.error(e),
+    }
     ui.refreshing.set(false);
     ui.changed();
 }

@@ -223,6 +223,8 @@ async fn uulf_feed_with_shorts_double_check() {
         Some("https://www.youtube.com/watch?v=aaaaaaaaaa1")
     );
     assert_eq!(task.est_minutes, 0, "duration unknown without an API key");
+    // Published 2026-10-15T14:00Z, leaves the feed 14 days later.
+    assert_eq!(task.expires_at, Some(1_793_282_400));
     assert_eq!(
         task.texts().collect::<Vec<_>>(),
         vec!["Kurzgesagt – In a Nutshell", "2026-10-15"]

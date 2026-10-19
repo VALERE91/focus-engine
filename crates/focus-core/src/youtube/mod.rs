@@ -457,7 +457,8 @@ impl Source for YouTubeSource {
                         difficulty: None,
                         device: Device::Desktop,
                         content,
-                        expires_at: None,
+                        // Leaves the "new" window then, even without a refresh.
+                        expires_at: u64::try_from(at + MAX_AGE.as_secs()).ok(),
                     },
                 ));
             }

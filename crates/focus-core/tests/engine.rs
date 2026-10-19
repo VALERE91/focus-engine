@@ -36,8 +36,8 @@ async fn fixture_at(now: &str) -> Fixture {
         },
     )
     .unwrap();
-    engine.import_pasted(KURZ).await;
-    engine.refresh().await;
+    engine.import_pasted(KURZ).await.unwrap();
+    engine.refresh().await.unwrap();
     Fixture {
         _dir: dir,
         engine,
@@ -178,4 +178,53 @@ async fn project_notes_live_in_the_data_dir() {
         "# Learn Rust\n\n- 2026-10-16 20:00 finish chapter 4\n"
     );
     assert_eq!(f.engine.projects().unwrap(), [p]);
+}
+
+fn outcome_rows(f: &Fixture) -> Vec<(String, String, Option<i64>)> {
+    let conn = rusqlite::Connection::open(f.engine.data_dir().join(focus_core::DB_FILE)).unwrap();
+    let mut stmt = conn
+        .prepare("SELECT task_id, verdict, undone_at FROM outcomes ORDER BY id")
+        .unwrap();
+    stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect()
+}
+
+#[tokio::test]
+async fn undo_keeps_the_history() {
+    let f = fixture_at(FRIDAY_EVENING).await;
+    f.engine.open_task(VIDEO_A).unwrap();
+    f.clock.advance_mins(1);
+    f.engine.undo(VIDEO_A).unwrap();
+    f.engine.mark_not_interested(VIDEO_A).unwrap();
+    assert_eq!(f.engine.budget().unwrap().spent_minutes, 0);
+    assert_eq!(feed_ids(&f.engine), [VIDEO_B]);
+
+    let rows = outcome_rows(&f);
+    assert_eq!(rows.len(), 2);
+    assert_eq!((rows[0].0.as_str(), rows[0].1.as_str()), (VIDEO_A, "done"));
+    // 2026-10-16T20:01 Toronto.
+    assert_eq!(rows[0].2, Some(1_792_195_260));
+    assert_eq!((rows[1].1.as_str(), rows[1].2), ("not-interested", None));
+}
+
+#[tokio::test]
+async fn tasks_expire_from_the_feed_without_a_refresh() {
+    let f = fixture_at(FRIDAY_EVENING).await;
+    assert_eq!(feed_ids(&f.engine), [VIDEO_A, VIDEO_B]);
+    // Video B was published 2026-10-10 14:00 UTC; 14 days later it is gone.
+    f.clock.set("2026-10-24T11:00:00-04:00[America/Toronto]");
+    assert_eq!(feed_ids(&f.engine), [VIDEO_A]);
+    assert!(f.engine.open_task(VIDEO_A).is_ok());
+}
+
+#[tokio::test]
+async fn following_changes_reach_the_feed_immediately() {
+    let f = fixture_at(FRIDAY_EVENING).await;
+    f.engine.set_followed(KURZ, false).unwrap();
+    assert!(feed_ids(&f.engine).is_empty());
+    assert!(f.engine.open_task(VIDEO_A).is_err());
+    f.engine.set_all_followed(true).unwrap();
+    assert_eq!(feed_ids(&f.engine), [VIDEO_A, VIDEO_B]);
 }
