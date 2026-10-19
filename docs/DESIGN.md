@@ -119,6 +119,13 @@ The policy turns (slot, mode, history) into a short ranked list of 1 to 3 tasks.
 
 In the prototype only the video budget exists. A hand-off is charged to the local date on which it happened; marking a video "watched" without opening it charges nothing; undo refunds the original day. When the budget is spent, the feed shows a calm "see you tomorrow" state with the project notes and a small "show the feed anyway" link (nudge, never lock).
 
+**Prototype policy (v0).** Before modes, ramps and ratings exist, the desktop "What now?" screen asks how much time the user has and ranks every cached task:
+
+- Videos must fit both the slot and the remaining video budget; a project next action always fits, since the user can work on part of it for the slot.
+- Score = fit to the slot (0 to 1) + 1 if the task is growth (`learning`, `production`, `mind-game`) while today's growth share is under target (default 30% of minutes, adjustable) + 0.5 momentum for a project worked on in the last 3 days + up to 0.3 novelty for recent videos − 0.5 per skip in the last 7 days. Ties go to the task id.
+- Up to 3 suggestions: the best task, then the best of another category, then the best remaining; each says why it was picked.
+- Outcomes: done and not interested remove a task; partial keeps it; skipped only lowers its score. The video budget counts video minutes only; growth share counts every minute recorded today.
+
 **Growth ramp.** A target share of `learning` + `mind-game` + `production` per mode, raised by a few points per week (for example 20%, 25%, 30%), capped by the user.
 
 **Back-off.** If the skip rate on growth tasks over the last 7 days rises above a threshold, the ramp pauses; if it keeps rising, it steps back. In effect a small bandit tuning itself to what the user actually does.

@@ -6,7 +6,7 @@ The full design lives in `docs/DESIGN.md`. Read it before any architectural chan
 
 ## Current phase: prototype
 
-Goal: a desktop app someone can use daily instead of opening YouTube. Build only this scope:
+Goal: a desktop app someone can use daily instead of opening YouTube, and that answers "what now?" with a mix that slowly favors growth. Build only this scope:
 
 1. **Solo mode only.** `focus-core` is embedded in the Dioxus desktop app. No HTTP server, no Docker yet.
 2. **Channel import + picker.** Import Google Takeout `subscriptions.csv` (columns: `Channel Id`, `Channel Url`, `Channel Title`; may have a header and blank lines) or pasted channel URLs/IDs. Show every channel with a checkbox; only ticked channels are followed.
@@ -19,8 +19,12 @@ Goal: a desktop app someone can use daily instead of opening YouTube. Build only
 5. **Outcomes.** Each card has "watched" and "not interested". Opening a video counts as watched unless undone.
 6. **Daily video budget.** 60 min on weekdays, 120 on weekends (configurable). Opening a video adds its duration if known, else a default of 15 min. When the budget is spent, the feed shows a calm "budget spent, see you tomorrow" state plus the project notes. Day boundaries use the local timezone.
 7. **Project notes.** A list of projects (name + status: idea, active, paused, finished, killed), each with one Markdown note at `<data dir>/projects/<slug>.md`, editable in the app, plus a "dump" box that appends a timestamped line.
+8. **Project next actions.** Each project has a one-sentence definition of done and one next action with a minutes estimate. Activating needs a definition of done; at most 2 projects are active (configurable). An active project's next action is a `production` task.
+9. **Channel categories.** Each channel is `leisure` (default) or `learning`; its videos take that category.
+10. **"What now?" home.** The user picks the time available (5, 15, 30, 60 min); a policy v0 in `focus-core` returns 1 to 3 suggestions, scored on fit to the slot, the gap to a daily growth target (default 30% of minutes on learning + production), project momentum and recent skips. Videos must fit the slot and the remaining video budget. Starting a project task runs a timer and ends with done, partly done or skipped; a skip means "not now", never "hide". The full video feed stays one click away.
+11. **Weekly check-in.** "Was this week well spent?" (1 to 5) with a short summary (video minutes, growth minutes, project actions done); past weeks stay visible.
 
-Explicitly out of scope for now: phone app, HTTP API, WASM extension host, policy engine beyond the budget, suggestions/search API, rewatches, research watch, calendars, focus-mode integration, LLM features. Do not stub these with dead code; leave room in the types instead.
+Explicitly out of scope for now: phone app, HTTP API, WASM extension host, growth ramp and back-off, difficulty ratings, idea cool-off, suggestions/search API, rewatches, research watch, calendars, focus-mode integration, LLM features. Do not stub these with dead code; leave room in the types instead.
 
 ## Workspace layout
 
