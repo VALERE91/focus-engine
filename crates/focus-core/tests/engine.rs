@@ -147,10 +147,12 @@ async fn settings_are_clamped_and_persist_across_reopen() {
             weekend_budget_minutes: 90,
             default_video_minutes: 0,
             refresh_interval_minutes: 1,
+            max_active_projects: 0,
         })
         .unwrap();
     assert_eq!(saved.default_video_minutes, 1);
     assert_eq!(saved.refresh_interval_minutes, 15);
+    assert_eq!(saved.max_active_projects, 1);
 
     let reopened = Engine::open(
         f.engine.data_dir(),
@@ -172,7 +174,7 @@ async fn project_notes_live_in_the_data_dir() {
     let f = fixture_at(FRIDAY_EVENING).await;
     let p = f
         .engine
-        .create_project("Learn Rust", ProjectStatus::Active)
+        .create_project("Learn Rust", ProjectStatus::Idea)
         .unwrap();
     f.engine.dump(&p.slug, "finish chapter 4").unwrap();
     assert_eq!(
@@ -247,4 +249,57 @@ async fn opening_charges_the_real_length_when_known() {
     // Unknown length: the default.
     assert_eq!(f.engine.open_task(VIDEO_B).unwrap(), 15);
     assert_eq!(f.engine.budget().unwrap().spent_minutes, 28);
+}
+
+#[tokio::test]
+async fn next_actions_of_active_projects_become_tasks() {
+    let f = fixture_at(FRIDAY_EVENING).await;
+    let e = &f.engine;
+    assert!(matches!(
+        e.create_project("Book", ProjectStatus::Active),
+        Err(focus_core::Error::NoDefinitionOfDone)
+    ));
+    let p = e.create_project("Book", ProjectStatus::Idea).unwrap();
+    e.set_project_plan(&p.slug, "Draft sent to the editor", "Outline chapter 1", 25)
+        .unwrap();
+    // Ideas offer no task yet.
+    assert!(project_tasks(e).is_empty());
+
+    e.set_project_status(&p.slug, ProjectStatus::Active)
+        .unwrap();
+    let tasks = project_tasks(e);
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].0, "projects:book:1");
+    assert_eq!(tasks[0].1["title"], "Outline chapter 1");
+    assert_eq!(tasks[0].1["category"], "production");
+    assert_eq!(tasks[0].1["est_minutes"], 25);
+    // The video feed never shows project tasks.
+    assert_eq!(feed_ids(e), [VIDEO_A, VIDEO_B]);
+
+    // Same next action, new estimate: same task. New next action: new task.
+    e.set_project_plan(&p.slug, "Draft sent to the editor", "Outline chapter 1", 30)
+        .unwrap();
+    assert_eq!(project_tasks(e)[0].0, "projects:book:1");
+    e.set_project_plan(&p.slug, "Draft sent to the editor", "Write chapter 1", 60)
+        .unwrap();
+    assert_eq!(project_tasks(e)[0].0, "projects:book:2");
+
+    e.set_project_status(&p.slug, ProjectStatus::Paused)
+        .unwrap();
+    assert!(project_tasks(e).is_empty());
+}
+
+/// (id, task JSON) of the cached project tasks.
+fn project_tasks(e: &Engine) -> Vec<(String, serde_json::Value)> {
+    let conn = rusqlite::Connection::open(e.data_dir().join(focus_core::DB_FILE)).unwrap();
+    let mut stmt = conn
+        .prepare("SELECT id, task_json FROM tasks WHERE source = 'projects' ORDER BY position")
+        .unwrap();
+    stmt.query_map([], |r| Ok((r.get(0)?, r.get::<_, String>(1)?)))
+        .unwrap()
+        .map(|r| {
+            let (id, json) = r.unwrap();
+            (id, serde_json::from_str(&json).unwrap())
+        })
+        .collect()
 }

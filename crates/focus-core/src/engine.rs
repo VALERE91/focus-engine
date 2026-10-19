@@ -15,7 +15,7 @@ use crate::adapters::{Clock, SystemClock, SystemOpener, UrlOpener, default_data_
 use crate::budget;
 use crate::error::{Error, Result};
 use crate::http::{HttpClient, ReqwestHttp};
-use crate::projects::ProjectStore;
+use crate::projects::{ProjectStore, ProjectTasks};
 use crate::source::{RefreshReport, Source, SourceHost};
 use crate::storage::{Db, SqliteKv};
 use crate::takeout;
@@ -55,6 +55,7 @@ pub struct Engine {
     opener: Arc<dyn UrlOpener>,
     youtube: Arc<YouTubeSource>,
     projects: ProjectStore,
+    project_tasks: Arc<ProjectTasks>,
 }
 
 impl Engine {
@@ -71,8 +72,10 @@ impl Engine {
             http: deps.http,
             clock: deps.clock.clone(),
         }));
+        let projects = ProjectStore::new(db.clone(), data_dir.join("projects"));
         let engine = Engine {
-            projects: ProjectStore::new(db.clone(), data_dir.join("projects")),
+            project_tasks: Arc::new(ProjectTasks::new(projects.clone())),
+            projects,
             db,
             data_dir: data_dir.to_path_buf(),
             clock: deps.clock,
@@ -89,7 +92,7 @@ impl Engine {
     }
 
     fn sources(&self) -> Vec<Arc<dyn Source>> {
-        vec![self.youtube.clone()]
+        vec![self.youtube.clone(), self.project_tasks.clone()]
     }
 
     // ----- channels ------------------------------------------------------
@@ -169,20 +172,22 @@ impl Engine {
         Ok(())
     }
 
-    /// The budget plus every cached task that is unexpired and unhandled.
+    /// The video feed: the budget plus every cached video that is
+    /// unexpired and unhandled.
     pub fn feed(&self) -> Result<Feed> {
         let budget = self.budget()?;
         let now = self.clock.now().timestamp().as_second();
         let conn = self.db.conn();
         let mut stmt = conn.prepare(
             "SELECT task_json FROM tasks t
-             WHERE (t.expires_at IS NULL OR t.expires_at > ?1)
+             WHERE t.source = ?2
+               AND (t.expires_at IS NULL OR t.expires_at > ?1)
                AND NOT EXISTS (
                    SELECT 1 FROM outcomes o WHERE o.task_id = t.id AND o.undone_at IS NULL)
-             ORDER BY t.source, t.position",
+             ORDER BY t.position",
         )?;
         let items = stmt
-            .query_map([now], |r| r.get::<_, String>(0))?
+            .query_map(params![now, youtube::NAME], |r| r.get::<_, String>(0))?
             .map(|json| Ok(serde_json::from_str(&json?)?))
             .collect::<Result<Vec<Task>>>()?;
         Ok(Feed { budget, items })
@@ -293,6 +298,7 @@ impl Engine {
             refresh_interval_minutes: settings
                 .refresh_interval_minutes
                 .max(MIN_REFRESH_INTERVAL_MINUTES),
+            max_active_projects: settings.max_active_projects.max(1),
             ..settings
         };
         budget::save_settings(&self.db, &settings)?;
@@ -305,12 +311,35 @@ impl Engine {
         self.projects.list()
     }
 
+    /// Creates a project. It cannot start active: a new project has no
+    /// definition of done yet (see [`Engine::set_project_status`]).
     pub fn create_project(&self, name: &str, status: ProjectStatus) -> Result<Project> {
+        if status == ProjectStatus::Active {
+            return Err(Error::NoDefinitionOfDone);
+        }
         self.projects.create(name, status, &self.clock.now())
     }
 
+    /// Activating needs a definition of done and a free active slot.
     pub fn set_project_status(&self, slug: &str, status: ProjectStatus) -> Result<()> {
-        self.projects.set_status(slug, status)
+        let max_active = self.settings()?.max_active_projects;
+        self.projects.set_status(slug, status, max_active)?;
+        self.sync_tasks()
+    }
+
+    /// Sets what "done" means and the one next action (with an estimate in
+    /// minutes, 0 if unknown). An active project's next action is offered
+    /// as a production task.
+    pub fn set_project_plan(
+        &self,
+        slug: &str,
+        definition_of_done: &str,
+        next_action: &str,
+        next_action_minutes: u32,
+    ) -> Result<()> {
+        self.projects
+            .set_plan(slug, definition_of_done, next_action, next_action_minutes)?;
+        self.sync_tasks()
     }
 
     pub fn note(&self, slug: &str) -> Result<String> {

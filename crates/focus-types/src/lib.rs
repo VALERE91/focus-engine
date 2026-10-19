@@ -218,14 +218,18 @@ pub struct Feed {
     pub items: Vec<Task>,
 }
 
-/// User-editable settings. Every field has a default, so no config is needed.
+/// User-editable settings. Every field has a default, so no config is
+/// needed, and settings saved by an older version gain the new defaults.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Settings {
     pub weekday_budget_minutes: u32,
     pub weekend_budget_minutes: u32,
     /// Charged when a video's duration is unknown.
     pub default_video_minutes: u32,
     pub refresh_interval_minutes: u32,
+    /// Projects that may be active at once.
+    pub max_active_projects: u32,
 }
 
 impl Default for Settings {
@@ -235,6 +239,7 @@ impl Default for Settings {
             weekend_budget_minutes: 120,
             default_video_minutes: 15,
             refresh_interval_minutes: 30,
+            max_active_projects: 2,
         }
     }
 }
@@ -279,6 +284,12 @@ pub struct Project {
     pub slug: String,
     pub name: String,
     pub status: ProjectStatus,
+    /// One sentence saying what finished means; required to activate.
+    pub definition_of_done: String,
+    /// One concrete next step; empty when none is set.
+    pub next_action: String,
+    /// Estimate for the next action; 0 when unknown.
+    pub next_action_minutes: u32,
 }
 
 #[cfg(test)]
