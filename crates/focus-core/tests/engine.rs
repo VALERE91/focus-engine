@@ -17,13 +17,19 @@ struct Fixture {
     opener: Arc<RecordingOpener>,
 }
 
-/// An engine following one channel whose feed holds two recent videos.
+/// An engine following one channel whose feed holds two recent videos,
+/// with unknown lengths (their watch pages answer 404).
 async fn fixture_at(now: &str) -> Fixture {
+    fixture_with(now, |_| {}).await
+}
+
+async fn fixture_with(now: &str, extra_routes: impl FnOnce(&MockHttp)) -> Fixture {
     let http = MockHttp::new();
     http.ok(feed_url(UULF), fixture("uulf_feed.xml"));
     for id in ["aaaaaaaaaa1", "bbbbbbbbbb2"] {
         http.redirect(shorts_url(id), &format!("/watch?v={id}"));
     }
+    extra_routes(&http);
     let clock = TestClock::at(now);
     let opener = Arc::new(RecordingOpener::default());
     let dir = tempfile::tempdir().unwrap();
@@ -227,4 +233,18 @@ async fn following_changes_reach_the_feed_immediately() {
     assert!(f.engine.open_task(VIDEO_A).is_err());
     f.engine.set_all_followed(true).unwrap();
     assert_eq!(feed_ids(&f.engine), [VIDEO_A, VIDEO_B]);
+}
+
+#[tokio::test]
+async fn opening_charges_the_real_length_when_known() {
+    let f = fixture_with(FRIDAY_EVENING, |http| {
+        http.ok(watch_url("aaaaaaaaaa1"), fixture("watch_page.html"));
+    })
+    .await;
+    let feed = f.engine.feed().unwrap();
+    assert_eq!(feed.items[0].est_minutes, 13);
+    assert_eq!(f.engine.open_task(VIDEO_A).unwrap(), 13);
+    // Unknown length: the default.
+    assert_eq!(f.engine.open_task(VIDEO_B).unwrap(), 15);
+    assert_eq!(f.engine.budget().unwrap().spent_minutes, 28);
 }

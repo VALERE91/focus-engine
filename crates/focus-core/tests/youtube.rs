@@ -199,6 +199,7 @@ async fn uulf_feed_with_shorts_double_check() {
         "https://www.youtube.com/watch?v=aaaaaaaaaa1",
     );
     http.status(shorts_url("bbbbbbbbbb2"), 200); // misclassified Short
+    http.ok(watch_url("aaaaaaaaaa1"), fixture("watch_page.html"));
     let clock = TestClock::new();
     let src = followed_kurz(http.clone(), clock.clone());
 
@@ -206,13 +207,14 @@ async fn uulf_feed_with_shorts_double_check() {
     assert_eq!(report.fetched, 1);
     assert_eq!(report.new_items, 3);
     assert!(report.errors.is_empty(), "{:?}", report.errors);
-    // Only the followed channel, only the UULF feed, and no check for the
-    // video older than the "new" window.
+    // Only the followed channel, only the UULF feed, no check for the video
+    // older than the "new" window, and a watch page only for the non-Short.
     assert_eq!(
         http.take_requests(),
         vec![
             feed_url(UULF),
             shorts_url("aaaaaaaaaa1"),
+            watch_url("aaaaaaaaaa1"),
             shorts_url("bbbbbbbbbb2"),
         ]
     );
@@ -223,7 +225,8 @@ async fn uulf_feed_with_shorts_double_check() {
         task.link_out(),
         Some("https://www.youtube.com/watch?v=aaaaaaaaaa1")
     );
-    assert_eq!(task.est_minutes, 0, "duration unknown without an API key");
+    // 754 s on the watch page, rounded up.
+    assert_eq!(task.est_minutes, 13);
     // Published 2026-10-15T14:00Z, leaves the feed 14 days later.
     assert_eq!(task.expires_at, Some(1_793_282_400));
     assert_eq!(
@@ -235,7 +238,8 @@ async fn uulf_feed_with_shorts_double_check() {
         Some("https://i2.ytimg.com/vi/aaaaaaaaaa1/hqdefault.jpg")
     );
 
-    // Shorts results are cached forever: the next refresh only fetches the feed.
+    // Shorts results and lengths are cached: the next refresh only fetches
+    // the feed.
     clock.advance_mins(20);
     src.refresh().await;
     assert_eq!(http.take_requests(), vec![feed_url(UULF)]);
@@ -410,6 +414,7 @@ async fn keeps_the_newest_videos_per_channel() {
                 published: Some(1_735_689_600 + i),
                 thumbnail: None,
                 duration_secs: None,
+                duration_attempts: 0,
                 in_uulf: true,
                 first_seen: 1_735_689_600,
             };
@@ -479,4 +484,43 @@ fn host_from(
         http,
         clock: TestClock::new(),
     }
+}
+
+#[tokio::test]
+async fn duration_lookups_give_up_after_three_attempts() {
+    let http = MockHttp::new();
+    http.ok(feed_url(UULF), fixture("uulf_feed.xml"));
+    for id in ["aaaaaaaaaa1", "bbbbbbbbbb2"] {
+        http.redirect(shorts_url(id), &format!("/watch?v={id}"));
+    }
+    // The watch page loads but has no length (say, YouTube changed it).
+    http.ok(watch_url("aaaaaaaaaa1"), "<html>no player data</html>");
+    http.fail(watch_url("bbbbbbbbbb2"));
+    let clock = TestClock::new();
+    let src = followed_kurz(http.clone(), clock.clone());
+
+    let watch_requests =
+        |reqs: Vec<String>| reqs.iter().filter(|u| u.contains("/watch?v=")).count();
+    for _ in 0..3 {
+        src.refresh().await;
+        assert_eq!(watch_requests(http.take_requests()), 2);
+        clock.advance_mins(20);
+    }
+    src.refresh().await;
+    assert_eq!(watch_requests(http.take_requests()), 0);
+    // Still in the feed, at the default length.
+    assert!(src.candidates(&ctx()).iter().all(|t| t.est_minutes == 0));
+    assert_eq!(candidate_ids(&src).len(), 2);
+}
+
+#[tokio::test]
+async fn shorts_never_get_a_watch_page_request() {
+    let http = MockHttp::new();
+    http.status(feed_url(UULF), 404);
+    http.ok(feed_url(UU), fixture("uulf_feed.xml"));
+    http.status(shorts_url("aaaaaaaaaa1"), 200);
+    http.fail(shorts_url("bbbbbbbbbb2")); // unchecked UU video: held back
+    let src = followed_kurz(http.clone(), TestClock::new());
+    src.refresh().await;
+    assert!(!http.take_requests().iter().any(|u| u.contains("/watch?v=")));
 }
