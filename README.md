@@ -1,4 +1,7 @@
 # Focus Engine
+
+[![CI](https://github.com/VALERE91/focus-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/VALERE91/focus-engine/actions/workflows/ci.yml)
+
 A simple AI tool that help you focus and grow your mind.
 
 How and why AI is used to build this project: see [AI-Usage.md](AI-Usage.md).
@@ -41,6 +44,8 @@ cargo fmt
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
+
+CI runs the same checks on Linux and Windows for every pull request and push to `main`, plus a build with the minimum supported Rust version (1.88). macOS is tested by hand.
 
 `crates/focus-core` holds all logic and is tested without network access; `crates/focus-app` is a thin Dioxus shell; `crates/focus-types` holds the shared types. The design lives in [`docs/DESIGN.md`](docs/DESIGN.md).
 
